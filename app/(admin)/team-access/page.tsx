@@ -36,23 +36,21 @@ export default async function TeamAccessPage() {
             <option value="event_ops">Ops</option>
             <option value="super_admin">Super</option>
           </select>
-          <div className="xl:col-span-1">
-            <input
-              list="club-options"
-              name="club_name"
-              placeholder="Type club"
-              className="h-11 w-full rounded-lg border border-border px-3"
-            />
-            <datalist id="club-options">
-              {clubs.map((club) => (
-                <option key={club.id} value={club.name} />
-              ))}
-            </datalist>
-          </div>
+          <select name="club_id" className="h-11 rounded-lg border border-border px-3 xl:col-span-1" disabled={!clubs.length}>
+            <option value="">{clubs.length ? "Select club" : "No clubs yet"}</option>
+            {clubs.map((club) => (
+              <option key={club.id} value={club.id}>{club.short_name ? `${club.short_name} — ${club.name}` : club.name}</option>
+            ))}
+          </select>
           <button className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-primary px-4 font-semibold text-white xl:col-span-1">
             <Plus className="h-4 w-4" /> Create
           </button>
         </form>
+        {!clubs.length ? (
+          <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">
+            Create/import clubs first. Club admins and POC admins need a club assignment before they can be created.
+          </p>
+        ) : null}
         <p className="mt-3 text-xs text-muted">
           Passwords are created by Super Admin. Admins should not get a self-service password-change flow unless you enable it later.
         </p>

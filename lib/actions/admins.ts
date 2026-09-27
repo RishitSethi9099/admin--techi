@@ -34,13 +34,15 @@ export async function inviteAdmin(formData: FormData) {
   const service = createServiceRoleClient();
   let assignedClubId = parsed.club_id ?? null;
   if (parsed.role !== "super_admin" && !assignedClubId && parsed.club_name) {
+    const typedClub = parsed.club_name.trim();
     const { data: club, error: clubError } = await service
       .from("clubs")
       .select("id")
-      .ilike("name", parsed.club_name.trim())
+      .or(`name.ilike.${typedClub},short_name.ilike.${typedClub},slug.ilike.${typedClub}`)
+      .limit(1)
       .maybeSingle();
     if (clubError) throw new Error(clubError.message);
-    if (!club) throw new Error(`Club not found: ${parsed.club_name}`);
+    if (!club) throw new Error(`Club not found: ${parsed.club_name}. Create this club first, then assign the admin.`);
     assignedClubId = club.id;
   }
   if (parsed.role !== "super_admin" && !assignedClubId) {
