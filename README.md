@@ -52,6 +52,34 @@ These pieces are prepared but intentionally do not pretend to be active until cr
 - Uptime/Sentry webhook senders
 - Deployment environment health checks
 
+## Vercel Environment Variables
+
+Required for deployment:
+
+```env
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_ANON_KEY=
+SUPABASE_SERVICE_ROLE_KEY=
+```
+
+Optional alert email variables:
+
+```env
+RESEND_API_KEY=
+RESEND_FROM_EMAIL=
+SUPER_ADMIN_ALERT_EMAIL=
+CRASH_WEBHOOK_SECRET=
+DISCORD_WEBHOOK_URL=
+```
+
+If `RESEND_FROM_EMAIL` is empty, the crash alert route uses Resend's temporary `onboarding@resend.dev` sender. That is useful before a domain is verified, but production email should use a verified Resend domain.
+
+Email routing:
+
+- Platform-wide errors go to active `super_admin` users.
+- Club-specific billboard/event/schedule errors go only to active `club_admin` users assigned to that club.
+- Banned or suspended admins are not emailed.
+
 ## Security Note
 
 This project stays on Next.js 14 as requested. As of the current npm registry audit, Next 14 is flagged with unresolved advisories and npm recommends a breaking upgrade to Next 16. Before production deployment, either approve a Next 16 upgrade or verify a patched Next 14 release is available.

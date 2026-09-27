@@ -5,6 +5,9 @@ import { requireProfile } from "@/lib/auth";
 import { canAccessPath } from "@/lib/permissions";
 import { redirect } from "next/navigation";
 
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   const profile = await requireProfile();
   const activePath = headers().get("x-pathname") ?? "/";

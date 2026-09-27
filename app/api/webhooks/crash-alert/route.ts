@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { Resend } from "resend";
 import { createServiceRoleClient, hasSupabaseEnv } from "@/lib/supabase/server";
+import type { AppRole } from "@/lib/supabase/types";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
   const secret = process.env.CRASH_WEBHOOK_SECRET;
@@ -20,6 +24,9 @@ export async function POST(request: Request) {
   const pageUrl = payload.page_url ?? payload.url ?? payload.event?.request?.url ?? null;
   const route = payload.route ?? payload.path ?? payload.event?.request?.url ?? null;
   const requestId = request.headers.get("x-request-id") ?? payload.request_id ?? payload.event?.event_id ?? null;
+  const resourceType = payload.resource_type ?? payload.entity_type ?? payload.type ?? null;
+  const resourceId = payload.resource_id ?? payload.entity_id ?? payload.billboard_id ?? payload.event_id ?? null;
+  const clubId = payload.club_id ?? null;
 
   const supabase = createServiceRoleClient();
   const { data: log, error } = await supabase
@@ -38,7 +45,12 @@ export async function POST(request: Request) {
       last_seen_at: new Date().toISOString(),
       request_id: requestId,
       response_time_ms: payload.response_time_ms ?? payload.responseTime ?? null,
-      metadata: payload
+      metadata: {
+        ...payload,
+        resource_type: resourceType,
+        resource_id: resourceId,
+        club_id: clubId
+      }
     })
     .select("id")
     .single();
@@ -55,19 +67,68 @@ export async function POST(request: Request) {
   const shouldSend = !existing || existing.last_sent_at < tenMinutesAgo;
   if (shouldSend) {
     await supabase.from("crash_alert_deliveries").upsert({ error_type: errorType, last_sent_at: new Date().toISOString() });
-    await sendEmail({ severity, message, pageUrl });
+    const recipients = await resolveEmailRecipients({
+      supabase,
+      severity,
+      resourceType,
+      resourceId,
+      clubId
+    });
+    await sendEmail({ severity, message, pageUrl, recipients });
     await pingDiscord({ severity, message, pageUrl });
   }
 
   return NextResponse.json({ ok: true, id: log?.id, notified: shouldSend });
 }
 
-async function sendEmail(input: { severity: string; message: string; pageUrl: string | null }) {
-  if (!process.env.RESEND_API_KEY || !process.env.SUPER_ADMIN_ALERT_EMAIL || !process.env.RESEND_FROM_EMAIL) return;
+type SupabaseServiceClient = ReturnType<typeof createServiceRoleClient>;
+
+async function resolveEmailRecipients(input: {
+  supabase: SupabaseServiceClient;
+  severity: string;
+  resourceType: unknown;
+  resourceId: unknown;
+  clubId: unknown;
+}) {
+  const explicitClubId = typeof input.clubId === "string" && input.clubId.length ? input.clubId : null;
+  const resourceType = typeof input.resourceType === "string" ? input.resourceType.toLowerCase() : "";
+  const resourceId = typeof input.resourceId === "string" && input.resourceId.length ? input.resourceId : null;
+  const isClubResource = ["billboard", "billboards", "event", "events", "schedule", "venue"].includes(resourceType);
+
+  let clubId = explicitClubId;
+  if (!clubId && resourceId && ["billboard", "billboards"].includes(resourceType)) {
+    const { data } = await input.supabase.from("billboards").select("club_id").eq("id", resourceId).maybeSingle();
+    clubId = data?.club_id ?? null;
+  }
+  if (!clubId && resourceId && ["event", "events", "schedule", "venue"].includes(resourceType)) {
+    const { data } = await input.supabase.from("events").select("club_id").eq("id", resourceId).maybeSingle();
+    clubId = data?.club_id ?? null;
+  }
+
+  const roles: AppRole[] = clubId && isClubResource ? ["club_admin"] : ["super_admin"];
+  const query = input.supabase
+    .from("users")
+    .select("email")
+    .eq("status", "active")
+    .eq("id_banned", false)
+    .eq("ip_banned", false)
+    .in("role", roles);
+
+  if (clubId && isClubResource) query.eq("club_id", clubId);
+
+  const { data } = await query;
+  const databaseRecipients = (data ?? []).map((row) => row.email).filter(Boolean);
+  const fallbackRecipients = !clubId && process.env.SUPER_ADMIN_ALERT_EMAIL ? [process.env.SUPER_ADMIN_ALERT_EMAIL] : [];
+
+  return Array.from(new Set([...databaseRecipients, ...fallbackRecipients]));
+}
+
+async function sendEmail(input: { severity: string; message: string; pageUrl: string | null; recipients: string[] }) {
+  if (!process.env.RESEND_API_KEY || !input.recipients.length) return;
   const resend = new Resend(process.env.RESEND_API_KEY);
   await resend.emails.send({
-    from: process.env.RESEND_FROM_EMAIL,
-    to: process.env.SUPER_ADMIN_ALERT_EMAIL,
+    from: process.env.RESEND_FROM_EMAIL || "onboarding@resend.dev",
+    to: input.recipients,
     subject: `[Techi] ${input.severity} alert`,
     html: `<h2>Techi alert</h2><p><strong>${input.severity}</strong></p><p>${input.message}</p><p>${input.pageUrl ?? ""}</p>`
   });
