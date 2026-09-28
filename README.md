@@ -6,7 +6,7 @@ Next.js 14 admin panel for Techi.
 
 1. Create a Supabase project.
 2. Apply `supabase/migrations/001_initial_schema.sql`.
-3. Copy `.env.example` to `.env.local` and fill the Supabase, Resend, Sentry, and webhook values.
+3. Create `.env.local` and fill the Supabase, Resend, Sentry, and webhook values listed below.
 4. Run the app:
 
 ```bash
@@ -38,8 +38,16 @@ Apply these migrations in order:
 1. `supabase/migrations/001_initial_schema.sql`
 2. `supabase/migrations/002_platform_control.sql`
 3. `supabase/migrations/003_audit_error_rich_metadata.sql`
+4. `supabase/migrations/004_team_access_bans.sql`
+5. `supabase/migrations/005_billboard_uploads_and_scope.sql`
 
 The second and third migrations add the production control-system layer: Event Ops role support, approval requests, notification records, backup run tracking, event lifecycle states, soft deletion metadata, richer error monitoring, and richer audit metadata.
+
+Seed the initial club list with:
+
+```sql
+supabase/seeds/initial_clubs.sql
+```
 
 ## Real Integrations Required
 
@@ -54,12 +62,15 @@ These pieces are prepared but intentionally do not pretend to be active until cr
 
 ## Vercel Environment Variables
 
+This project is pinned to Node.js 20 through `package.json` and `.nvmrc`. In Vercel, import the GitHub repo, keep the framework as Next.js, and deploy from `main`.
+
 Required for deployment:
 
 ```env
 NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
+SUPABASE_JWT_SECRET=
 ```
 
 Optional alert email variables:
