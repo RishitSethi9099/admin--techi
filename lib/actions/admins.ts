@@ -17,6 +17,18 @@ const inviteSchema = z.object({
   club_name: z.string().nullable().optional()
 });
 
+function teamAccessError(message: string): never {
+  redirect(`/team-access?error=${encodeURIComponent(message)}`);
+}
+
+async function writeAuditLogSafely(input: Parameters<typeof writeAuditLog>[0]) {
+  try {
+    await writeAuditLog(input);
+  } catch (error) {
+    console.error("Audit log write failed", error);
+  }
+}
+
 export async function inviteAdmin(formData: FormData) {
   await requireSuperAdmin();
   if (!hasSupabaseEnv()) {
@@ -42,12 +54,14 @@ export async function inviteAdmin(formData: FormData) {
       .or(`name.ilike.${typedClub},short_name.ilike.${typedClub},slug.ilike.${typedClub}`)
       .limit(1)
       .maybeSingle();
-    if (clubError) throw new Error(clubError.message);
-    if (!club) throw new Error(`Club not found: ${parsed.club_name}. Create this club first, then assign the admin.`);
+    if (clubError) teamAccessError(clubError.message);
+    if (!club) {
+      teamAccessError(`Club not found: ${parsed.club_name}. Create this club first, then assign the admin.`);
+    }
     assignedClubId = club.id;
   }
   if (parsed.role !== "super_admin" && !assignedClubId) {
-    throw new Error("Assign a club for this admin.");
+    teamAccessError("Assign a club for this admin.");
   }
   const { data, error } = await service.auth.admin.createUser({
     email: parsed.email,
@@ -59,7 +73,8 @@ export async function inviteAdmin(formData: FormData) {
       password_managed_by_super_admin: true
     }
   });
-  if (error) throw new Error(error.message);
+  if (error) teamAccessError(error.message);
+  if (!data.user) teamAccessError("Supabase created no auth user. Try again.");
   const { error: profileError } = await service.from("users").upsert({
     id: data.user.id,
     name: parsed.name,
@@ -69,8 +84,8 @@ export async function inviteAdmin(formData: FormData) {
     club_id: parsed.role === "super_admin" ? null : assignedClubId,
     status: "active"
   });
-  if (profileError) throw new Error(profileError.message);
-  await writeAuditLog({ action: "admin.create_fixed_access", entityType: "user", entityId: data.user.id, diff: { ...parsed, password: "[redacted]" } });
+  if (profileError) teamAccessError(profileError.message);
+  await writeAuditLogSafely({ action: "admin.create_fixed_access", entityType: "user", entityId: data.user.id, diff: { ...parsed, password: "[redacted]" } });
   revalidatePath("/team-access");
   redirect(`/team-access?created=1&email=${encodeURIComponent(parsed.email)}`);
 }
@@ -102,8 +117,8 @@ export async function updateAdmin(formData: FormData) {
   });
   const supabase = createSupabaseServerClient();
   const { error } = await supabase.from("users").update(parsed).eq("id", parsed.id);
-  if (error) throw new Error(error.message);
-  await writeAuditLog({ action: "update", entityType: "user", entityId: parsed.id, diff: parsed });
+  if (error) teamAccessError(error.message);
+  await writeAuditLogSafely({ action: "update", entityType: "user", entityId: parsed.id, diff: parsed });
   revalidatePath("/team-access");
   redirect("/team-access?updated=1");
 }

@@ -12,7 +12,7 @@ import { formatDateTime } from "@/lib/utils";
 export default async function TeamAccessPage({
   searchParams
 }: {
-  searchParams?: { created?: string; updated?: string; email?: string };
+  searchParams?: { created?: string; updated?: string; email?: string; error?: string };
 }) {
   await requireSuperAdmin();
   const loadResult = await Promise.all([getAdmins(), getClubs()])
@@ -37,6 +37,12 @@ export default async function TeamAccessPage({
       {searchParams?.updated ? (
         <Card className="mb-5 border-green-200 bg-green-50 p-4 text-sm text-green-700">
           Admin access updated.
+        </Card>
+      ) : null}
+
+      {searchParams?.error ? (
+        <Card className="mb-5 border-red-200 bg-red-50 p-4 text-sm text-red-700">
+          {searchParams.error}
         </Card>
       ) : null}
 
