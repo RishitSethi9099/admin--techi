@@ -9,7 +9,11 @@ import { getAdmins, getClubs } from "@/lib/data";
 import { inviteAdmin, updateAdmin } from "@/lib/actions/admins";
 import { formatDateTime } from "@/lib/utils";
 
-export default async function TeamAccessPage() {
+export default async function TeamAccessPage({
+  searchParams
+}: {
+  searchParams?: { created?: string; updated?: string; email?: string };
+}) {
   await requireSuperAdmin();
   const loadResult = await Promise.all([getAdmins(), getClubs()])
     .then(([admins, clubs]) => ({ admins, clubs, error: null as string | null }))
@@ -23,6 +27,18 @@ export default async function TeamAccessPage() {
         title="Team Access"
         subtitle="Create fixed admin credentials, check active access, and control ID/IP bans."
       />
+
+      {searchParams?.created ? (
+        <Card className="mb-5 border-green-200 bg-green-50 p-4 text-sm text-green-700">
+          Admin access created{searchParams.email ? ` for ${searchParams.email}` : ""}. The form has been reset for the next account.
+        </Card>
+      ) : null}
+
+      {searchParams?.updated ? (
+        <Card className="mb-5 border-green-200 bg-green-50 p-4 text-sm text-green-700">
+          Admin access updated.
+        </Card>
+      ) : null}
 
       {loadResult.error ? (
         <Card className="mb-5 border-amber-200 bg-amber-50 p-5 text-amber-800">

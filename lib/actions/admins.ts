@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { z } from "zod";
 import { requireSuperAdmin } from "@/lib/auth";
 import { writeAuditLog } from "@/lib/actions/audit";
@@ -20,7 +21,7 @@ export async function inviteAdmin(formData: FormData) {
   await requireSuperAdmin();
   if (!hasSupabaseEnv()) {
     revalidatePath("/team-access");
-    return;
+    redirect("/team-access?created=1");
   }
   const parsed = inviteSchema.parse({
     name: formData.get("name"),
@@ -59,7 +60,7 @@ export async function inviteAdmin(formData: FormData) {
     }
   });
   if (error) throw new Error(error.message);
-  await service.from("users").upsert({
+  const { error: profileError } = await service.from("users").upsert({
     id: data.user.id,
     name: parsed.name,
     email: parsed.email,
@@ -68,8 +69,10 @@ export async function inviteAdmin(formData: FormData) {
     club_id: parsed.role === "super_admin" ? null : assignedClubId,
     status: "active"
   });
+  if (profileError) throw new Error(profileError.message);
   await writeAuditLog({ action: "admin.create_fixed_access", entityType: "user", entityId: data.user.id, diff: { ...parsed, password: "[redacted]" } });
   revalidatePath("/team-access");
+  redirect(`/team-access?created=1&email=${encodeURIComponent(parsed.email)}`);
 }
 
 const updateAdminSchema = z.object({
@@ -86,7 +89,7 @@ export async function updateAdmin(formData: FormData) {
   await requireSuperAdmin();
   if (!hasSupabaseEnv()) {
     revalidatePath("/team-access");
-    return;
+    redirect("/team-access?updated=1");
   }
   const parsed = updateAdminSchema.parse({
     id: formData.get("id"),
@@ -102,4 +105,5 @@ export async function updateAdmin(formData: FormData) {
   if (error) throw new Error(error.message);
   await writeAuditLog({ action: "update", entityType: "user", entityId: parsed.id, diff: parsed });
   revalidatePath("/team-access");
+  redirect("/team-access?updated=1");
 }
