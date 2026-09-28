@@ -68,18 +68,30 @@ export default async function TeamAccessPage({
           <input name="login_id" required placeholder="Login ID" className="h-11 rounded-lg border border-border px-3 xl:col-span-2" />
           <input name="email" required type="email" placeholder="Email" className="h-11 rounded-lg border border-border px-3 xl:col-span-3" />
           <input name="password" required type="text" minLength={8} placeholder="Fixed password" className="h-11 rounded-lg border border-border px-3 xl:col-span-2" />
-          <select name="role" className="h-11 rounded-lg border border-border px-3 xl:col-span-1">
+          <select name="role" className="h-11 rounded-lg border border-border px-3 xl:col-span-3">
             <option value="club_admin">Club</option>
             <option value="event_ops">Ops</option>
             <option value="super_admin">Super</option>
           </select>
-          <select name="club_id" className="h-11 rounded-lg border border-border px-3 xl:col-span-1" disabled={!clubs.length}>
-            <option value="">{clubs.length ? "Select club" : "No clubs yet"}</option>
-            {clubs.map((club) => (
-              <option key={club.id} value={club.id}>{club.short_name ? `${club.short_name} — ${club.name}` : club.name}</option>
-            ))}
-          </select>
-          <button className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-primary px-4 font-semibold text-white xl:col-span-1">
+          <label className="xl:col-span-6">
+            <span className="mb-1 block text-xs font-semibold text-muted">Club Admin: choose one club</span>
+            <select name="club_id" className="h-11 w-full rounded-lg border border-border px-3" disabled={!clubs.length}>
+              <option value="">{clubs.length ? "Select one club" : "No clubs yet"}</option>
+              {clubs.map((club) => (
+                <option key={club.id} value={club.id}>{club.short_name ? `${club.short_name} — ${club.name}` : club.name}</option>
+              ))}
+            </select>
+          </label>
+          <label className="xl:col-span-6">
+            <span className="mb-1 block text-xs font-semibold text-muted">Ops / POC Admin: choose up to 10 clubs</span>
+            <select name="club_ids" multiple size={Math.min(Math.max(clubs.length, 4), 10)} className="min-h-28 w-full rounded-lg border border-border px-3 py-2" disabled={!clubs.length}>
+              {clubs.map((club) => (
+                <option key={club.id} value={club.id}>{club.short_name ? `${club.short_name} — ${club.name}` : club.name}</option>
+              ))}
+            </select>
+            <span className="mt-1 block text-xs text-muted">Hold Ctrl/Cmd to select multiple clubs.</span>
+          </label>
+          <button className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-primary px-4 font-semibold text-white xl:col-span-12">
             <Plus className="h-4 w-4" /> Create
           </button>
         </form>
@@ -111,12 +123,21 @@ export default async function TeamAccessPage({
                   <div className="mt-1 truncate text-sm text-muted">{admin.email}</div>
                   <div className="mt-2 grid gap-1 text-xs text-muted sm:grid-cols-2">
                     <span>Login ID: {admin.login_id ?? "not set"}</span>
-                    <span>Club: {clubName(admin.club_id)}</span>
+                    <span>Club: {admin.role === "event_ops" ? `${admin.assigned_clubs?.length ?? 0} assigned` : clubName(admin.club_id)}</span>
                     <span>Last active: {formatDateTime(admin.last_login_at)}</span>
                     <span>
                       Ban flags: {admin.id_banned ? "ID banned" : "ID clear"} / {admin.ip_banned ? "IP banned" : "IP clear"}
                     </span>
                   </div>
+                  {admin.role === "event_ops" && admin.assigned_clubs?.length ? (
+                    <div className="mt-3 flex flex-wrap gap-1.5">
+                      {admin.assigned_clubs.map((club) => (
+                        <span key={club.id} className="rounded-full bg-slate-100 px-2 py-1 text-xs text-muted">
+                          {club.short_name ?? club.name}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
                 </div>
                 <form action={updateAdmin} className="w-full space-y-2 lg:w-80">
                   <input type="hidden" name="id" value={admin.id} />

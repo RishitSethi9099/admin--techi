@@ -14,6 +14,7 @@ const inviteSchema = z.object({
   password: z.string().min(8),
   role: z.enum(["super_admin", "club_admin", "event_ops"]),
   club_id: z.string().uuid().nullable().optional(),
+  club_ids: z.array(z.string().uuid()).default([]),
   club_name: z.string().nullable().optional()
 });
 
@@ -42,10 +43,15 @@ export async function inviteAdmin(formData: FormData) {
     password: formData.get("password"),
     role: formData.get("role"),
     club_id: formData.get("club_id") || null,
+    club_ids: formData.getAll("club_ids").filter(Boolean),
     club_name: (formData.get("club_name") as string) || null
   });
   const service = createServiceRoleClient();
   let assignedClubId = parsed.club_id ?? null;
+  const assignedClubIds = Array.from(new Set(parsed.club_ids));
+  if (parsed.role === "event_ops" && assignedClubIds.length > 10) {
+    teamAccessError("Event Ops admins can be assigned to at most 10 clubs.");
+  }
   if (parsed.role !== "super_admin" && !assignedClubId && parsed.club_name) {
     const typedClub = parsed.club_name.trim();
     const { data: club, error: clubError } = await service
@@ -60,8 +66,11 @@ export async function inviteAdmin(formData: FormData) {
     }
     assignedClubId = club.id;
   }
-  if (parsed.role !== "super_admin" && !assignedClubId) {
+  if (parsed.role === "club_admin" && !assignedClubId) {
     teamAccessError("Assign a club for this admin.");
+  }
+  if (parsed.role === "event_ops" && !assignedClubIds.length) {
+    teamAccessError("Assign at least one club for this Event Ops admin.");
   }
   const { data, error } = await service.auth.admin.createUser({
     email: parsed.email,
@@ -81,10 +90,19 @@ export async function inviteAdmin(formData: FormData) {
     email: parsed.email,
     login_id: parsed.login_id,
     role: parsed.role,
-    club_id: parsed.role === "super_admin" ? null : assignedClubId,
+    club_id: parsed.role === "club_admin" ? assignedClubId : null,
     status: "active"
   });
   if (profileError) teamAccessError(profileError.message);
+  if (parsed.role === "event_ops") {
+    const { error: accessError } = await service
+      .from("admin_club_access")
+      .insert(assignedClubIds.map((clubId) => ({
+        user_id: data.user.id,
+        club_id: clubId
+      })));
+    if (accessError) teamAccessError(accessError.message);
+  }
   await writeAuditLogSafely({ action: "admin.create_fixed_access", entityType: "user", entityId: data.user.id, diff: { ...parsed, password: "[redacted]" } });
   revalidatePath("/team-access");
   redirect(`/team-access?created=1&email=${encodeURIComponent(parsed.email)}`);

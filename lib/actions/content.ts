@@ -5,6 +5,7 @@ import { z } from "zod";
 import { requireProfile, requireSuperAdmin } from "@/lib/auth";
 import { writeAuditLog } from "@/lib/actions/audit";
 import { createSupabaseServerClient, hasSupabaseEnv } from "@/lib/supabase/server";
+import { getAssignedClubIds } from "@/lib/data";
 
 const billboardSchema = z.object({
   club_id: z.string().uuid(),
@@ -173,6 +174,10 @@ export async function saveEvent(formData: FormData) {
   }
   const parsed = eventSchema.parse(Object.fromEntries(formData));
   if (profile.role === "club_admin" && parsed.club_id !== profile.club_id) throw new Error("Wrong club scope.");
+  if (profile.role === "event_ops") {
+    const assignedClubIds = await getAssignedClubIds(profile.id);
+    if (!assignedClubIds.includes(parsed.club_id)) throw new Error("Wrong event ops club scope.");
+  }
   const supabase = createSupabaseServerClient();
   const posterFile = formData.get("poster_file");
   const uploadedPosterUrl = await uploadMediaFile({

@@ -63,7 +63,39 @@ export async function getAdmins() {
       ban_reason: null
     })) as Profile[];
   }
-  return (data ?? []) as Profile[];
+  const admins = (data ?? []) as Profile[];
+  const adminIds = admins.map((admin) => admin.id);
+  if (!adminIds.length) return admins;
+
+  const { data: access } = await supabase
+    .from("admin_club_access")
+    .select("user_id,clubs(id,name,slug,short_name,logo_url)")
+    .in("user_id", adminIds);
+
+  const clubsByAdmin = new Map<string, Club[]>();
+  for (const row of access ?? []) {
+    const userId = row.user_id as string;
+    const club = Array.isArray(row.clubs) ? row.clubs[0] : row.clubs;
+    if (!club) continue;
+    clubsByAdmin.set(userId, [...(clubsByAdmin.get(userId) ?? []), club as Club]);
+  }
+
+  return admins.map((admin) => ({
+    ...admin,
+    assigned_clubs: clubsByAdmin.get(admin.id) ?? []
+  }));
+}
+
+export async function getAssignedClubIds(userId: string) {
+  if (!hasSupabaseEnv()) return [] as string[];
+
+  const supabase = createSupabaseServerClient();
+  const { data } = await supabase
+    .from("admin_club_access")
+    .select("club_id")
+    .eq("user_id", userId);
+
+  return (data ?? []).map((row) => row.club_id as string);
 }
 
 export async function getBillboards() {

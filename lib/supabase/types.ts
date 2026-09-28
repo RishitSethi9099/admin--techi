@@ -19,6 +19,7 @@ export type Profile = {
   banned_ip?: string | null;
   ban_reason?: string | null;
   last_login_at: string | null;
+  assigned_clubs?: Club[];
 };
 
 export type Club = {

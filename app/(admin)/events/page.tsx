@@ -4,24 +4,46 @@ import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { requireProfile } from "@/lib/auth";
 import { approveContent, saveEvent } from "@/lib/actions/content";
-import { getClubs, getEvents } from "@/lib/data";
+import { getAssignedClubIds, getClubs, getEvents } from "@/lib/data";
 import { formatDateTime } from "@/lib/utils";
 
 export default async function EventsPage() {
   const profile = await requireProfile();
-  const [events, clubs] = await Promise.all([getEvents(), getClubs()]);
-  const visibleClubs = profile.role === "super_admin" ? clubs : clubs.filter((club) => club.id === profile.club_id);
+  const [events, clubs, assignedClubIds] = await Promise.all([getEvents(), getClubs(), profile.role === "event_ops" ? getAssignedClubIds(profile.id) : Promise.resolve([])]);
+  const visibleClubs =
+    profile.role === "super_admin"
+      ? clubs
+      : profile.role === "event_ops"
+        ? clubs.filter((club) => assignedClubIds.includes(club.id))
+        : clubs.filter((club) => club.id === profile.club_id);
   const assignedClub = visibleClubs[0] ?? null;
-  const visibleEvents = profile.role === "super_admin" ? events : events.filter((event) => event.club_id === profile.club_id);
+  const visibleEvents =
+    profile.role === "super_admin"
+      ? events
+      : profile.role === "event_ops"
+        ? events.filter((event) => assignedClubIds.includes(event.club_id))
+        : events.filter((event) => event.club_id === profile.club_id);
 
   return (
     <>
       <PageTitle title="Events, Schedule & Venue" subtitle="Submit event title, details, poster, time, venue, and registration link." />
       <Card className="mb-5 p-5">
-        {profile.role !== "super_admin" && assignedClub ? (
+        {profile.role === "club_admin" && assignedClub ? (
           <div className="mb-4 rounded-2xl border border-primary/20 bg-primary-soft px-4 py-3">
             <div className="text-xs font-semibold uppercase tracking-wide text-primary">Your club</div>
             <div className="text-lg font-semibold text-foreground">{assignedClub.name}</div>
+          </div>
+        ) : null}
+        {profile.role === "event_ops" && visibleClubs.length ? (
+          <div className="mb-4 rounded-2xl border border-primary/20 bg-primary-soft px-4 py-3">
+            <div className="text-xs font-semibold uppercase tracking-wide text-primary">Assigned clubs</div>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {visibleClubs.map((club) => (
+                <span key={club.id} className="rounded-full bg-white px-3 py-1 text-sm font-medium text-foreground">
+                  {club.short_name ?? club.name}
+                </span>
+              ))}
+            </div>
           </div>
         ) : null}
         {!assignedClub && profile.role !== "super_admin" ? (
@@ -30,7 +52,7 @@ export default async function EventsPage() {
           </div>
         ) : (
           <form action={saveEvent} className="grid gap-3">
-            {profile.role === "super_admin" ? (
+            {profile.role === "super_admin" || profile.role === "event_ops" ? (
               <select name="club_id" required className="h-11 rounded-xl border border-border px-3">
                 <option value="">Select club</option>
                 {visibleClubs.map((club) => <option key={club.id} value={club.id}>{club.name}</option>)}
