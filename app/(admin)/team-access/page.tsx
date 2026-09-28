@@ -11,7 +11,10 @@ import { formatDateTime } from "@/lib/utils";
 
 export default async function TeamAccessPage() {
   await requireSuperAdmin();
-  const [admins, clubs] = await Promise.all([getAdmins(), getClubs()]);
+  const loadResult = await Promise.all([getAdmins(), getClubs()])
+    .then(([admins, clubs]) => ({ admins, clubs, error: null as string | null }))
+    .catch((error: Error) => ({ admins: [], clubs: [], error: error.message }));
+  const { admins, clubs } = loadResult;
   const clubName = (id: string | null) => clubs.find((club) => club.id === id)?.name ?? "All clubs";
 
   return (
@@ -20,6 +23,18 @@ export default async function TeamAccessPage() {
         title="Team Access"
         subtitle="Create fixed admin credentials, check active access, and control ID/IP bans."
       />
+
+      {loadResult.error ? (
+        <Card className="mb-5 border-amber-200 bg-amber-50 p-5 text-amber-800">
+          <div className="font-semibold">Team Access needs a Supabase schema update</div>
+          <p className="mt-2 text-sm">
+            {loadResult.error}
+          </p>
+          <p className="mt-2 text-sm">
+            Run all migrations up to <code>005_billboard_uploads_and_scope.sql</code>, then refresh this page.
+          </p>
+        </Card>
+      ) : null}
 
       <Card className="mb-5 p-5">
         <div className="mb-4 flex items-center gap-2 text-sm font-semibold text-foreground">

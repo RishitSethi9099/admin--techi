@@ -35,7 +35,8 @@ export async function getClubs() {
   if (!hasSupabaseEnv()) return demoClubs;
 
   const supabase = createSupabaseServerClient();
-  const { data } = await supabase.from("clubs").select("id,name,slug,logo_url").order("name");
+  const { data, error } = await supabase.from("clubs").select("id,name,slug,short_name,logo_url").order("name");
+  if (error) throw new Error(error.message);
   return (data ?? []) as Club[];
 }
 
@@ -43,10 +44,25 @@ export async function getAdmins() {
   if (!hasSupabaseEnv()) return demoAdmins;
 
   const supabase = createSupabaseServerClient();
-  const { data } = await supabase
+  const { data, error: richError } = await supabase
     .from("users")
     .select("id,name,email,login_id,role,club_id,status,id_banned,ip_banned,banned_ip,ban_reason,last_login_at")
     .order("created_at", { ascending: false });
+  if (richError) {
+    const { data: fallbackData, error } = await supabase
+      .from("users")
+      .select("id,name,email,role,club_id,status,last_login_at")
+      .order("created_at", { ascending: false });
+    if (error) throw new Error(error.message);
+    return (fallbackData ?? []).map((admin) => ({
+      ...admin,
+      login_id: null,
+      id_banned: false,
+      ip_banned: false,
+      banned_ip: null,
+      ban_reason: null
+    })) as Profile[];
+  }
   return (data ?? []) as Profile[];
 }
 
