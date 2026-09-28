@@ -1,4 +1,4 @@
-import { Ban, KeyRound, Plus, ShieldCheck } from "lucide-react";
+import { Ban, KeyRound, ShieldCheck } from "lucide-react";
 import { PageTitle } from "@/components/admin/page-title";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
@@ -6,8 +6,9 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { requireSuperAdmin } from "@/lib/auth";
 import { getAdmins, getClubs } from "@/lib/data";
-import { inviteAdmin, updateAdmin } from "@/lib/actions/admins";
+import { updateAdmin } from "@/lib/actions/admins";
 import { formatDateTime } from "@/lib/utils";
+import { TeamAccessCreateForm } from "@/components/admin/team-access-create-form";
 
 export default async function TeamAccessPage({
   searchParams
@@ -63,38 +64,7 @@ export default async function TeamAccessPage({
           <KeyRound className="h-4 w-4 text-primary" />
           Create admin access
         </div>
-        <form action={inviteAdmin} className="grid gap-3 xl:grid-cols-12">
-          <input name="name" required placeholder="Name" className="h-11 rounded-lg border border-border px-3 xl:col-span-2" />
-          <input name="login_id" required placeholder="Login ID" className="h-11 rounded-lg border border-border px-3 xl:col-span-2" />
-          <input name="email" required type="email" placeholder="Email" className="h-11 rounded-lg border border-border px-3 xl:col-span-3" />
-          <input name="password" required type="text" minLength={8} placeholder="Fixed password" className="h-11 rounded-lg border border-border px-3 xl:col-span-2" />
-          <select name="role" className="h-11 rounded-lg border border-border px-3 xl:col-span-3">
-            <option value="club_admin">Club</option>
-            <option value="event_ops">Ops</option>
-            <option value="super_admin">Super</option>
-          </select>
-          <label className="xl:col-span-6">
-            <span className="mb-1 block text-xs font-semibold text-muted">Club Admin: choose one club</span>
-            <select name="club_id" className="h-11 w-full rounded-lg border border-border px-3" disabled={!clubs.length}>
-              <option value="">{clubs.length ? "Select one club" : "No clubs yet"}</option>
-              {clubs.map((club) => (
-                <option key={club.id} value={club.id}>{club.short_name ? `${club.short_name} — ${club.name}` : club.name}</option>
-              ))}
-            </select>
-          </label>
-          <label className="xl:col-span-6">
-            <span className="mb-1 block text-xs font-semibold text-muted">Ops / POC Admin: choose up to 10 clubs</span>
-            <select name="club_ids" multiple size={Math.min(Math.max(clubs.length, 4), 10)} className="min-h-28 w-full rounded-lg border border-border px-3 py-2" disabled={!clubs.length}>
-              {clubs.map((club) => (
-                <option key={club.id} value={club.id}>{club.short_name ? `${club.short_name} — ${club.name}` : club.name}</option>
-              ))}
-            </select>
-            <span className="mt-1 block text-xs text-muted">Hold Ctrl/Cmd to select multiple clubs.</span>
-          </label>
-          <button className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-primary px-4 font-semibold text-white xl:col-span-12">
-            <Plus className="h-4 w-4" /> Create
-          </button>
-        </form>
+        <TeamAccessCreateForm clubs={clubs} />
         {!clubs.length ? (
           <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">
             Create/import clubs first. Club admins and POC admins need a club assignment before they can be created.
