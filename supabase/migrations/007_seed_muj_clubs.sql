@@ -1,3 +1,4 @@
+-- Full MUJ club list for Team Access, billboards, and event scheduling dropdowns.
 insert into public.clubs (name, slug, short_name, description)
 values
   ('Accelerate', 'accelerate', 'Accelerate', 'Accelerate club.'),
