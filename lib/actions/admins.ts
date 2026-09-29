@@ -18,8 +18,24 @@ const inviteSchema = z.object({
   club_name: z.string().nullable().optional()
 });
 
+type ServiceRoleClient = ReturnType<typeof createServiceRoleClient>;
+
 function teamAccessError(message: string): never {
   redirect(`/team-access?error=${encodeURIComponent(message)}`);
+}
+
+function isAlreadyRegisteredError(message: string) {
+  return /already\s+(been\s+)?registered|already\s+exists|already\s+registered/i.test(message);
+}
+
+function databaseSetupMessage(message: string) {
+  if (message.includes("super_admin_has_no_required_club")) {
+    return "Database constraint is still on the old Team Access schema. Run migration 006_event_ops_club_access.sql in Supabase, then try again.";
+  }
+  if (message.includes("admin_club_access") && message.includes("does not exist")) {
+    return "Database table admin_club_access is missing. Run migration 006_event_ops_club_access.sql in Supabase, then try again.";
+  }
+  return message;
 }
 
 async function writeAuditLogSafely(input: Parameters<typeof writeAuditLog>[0]) {
@@ -28,6 +44,31 @@ async function writeAuditLogSafely(input: Parameters<typeof writeAuditLog>[0]) {
   } catch (error) {
     console.error("Audit log write failed", error);
   }
+}
+
+async function deleteAuthUserSafely(service: ServiceRoleClient, userId: string) {
+  try {
+    const { error } = await service.auth.admin.deleteUser(userId);
+    if (error) console.error("Auth cleanup failed", error.message);
+  } catch (error) {
+    console.error("Auth cleanup failed", error);
+  }
+}
+
+async function findAuthUserByEmail(service: ServiceRoleClient, email: string) {
+  const normalizedEmail = email.toLowerCase();
+  let page = 1;
+
+  while (page <= 10) {
+    const { data, error } = await service.auth.admin.listUsers({ page, perPage: 100 });
+    if (error) teamAccessError(error.message);
+    const user = data.users.find((item) => item.email?.toLowerCase() === normalizedEmail);
+    if (user) return user;
+    if (data.users.length < 100) return null;
+    page += 1;
+  }
+
+  return null;
 }
 
 export async function inviteAdmin(formData: FormData) {
@@ -82,28 +123,63 @@ export async function inviteAdmin(formData: FormData) {
       password_managed_by_super_admin: true
     }
   });
-  if (error) teamAccessError(error.message);
-  if (!data.user) teamAccessError("Supabase created no auth user. Try again.");
+  let authUserId = data.user?.id ?? null;
+  let shouldDeleteAuthUserOnFailure = Boolean(authUserId);
+
+  if (error) {
+    if (!isAlreadyRegisteredError(error.message)) {
+      teamAccessError(error.message);
+    }
+
+    const existingAuthUser = await findAuthUserByEmail(service, parsed.email);
+    if (!existingAuthUser) teamAccessError(error.message);
+
+    const { data: existingProfile, error: existingProfileError } = await service
+      .from("users")
+      .select("id")
+      .eq("id", existingAuthUser.id)
+      .maybeSingle();
+    if (existingProfileError) teamAccessError(databaseSetupMessage(existingProfileError.message));
+    if (existingProfile) teamAccessError("This email is already linked to an admin account.");
+
+    authUserId = existingAuthUser.id;
+    shouldDeleteAuthUserOnFailure = false;
+  }
+
+  if (!authUserId) teamAccessError("Supabase created no auth user. Try again.");
+  const primaryClubId = parsed.role === "club_admin" ? assignedClubId : parsed.role === "event_ops" ? assignedClubIds[0] : null;
   const { error: profileError } = await service.from("users").upsert({
-    id: data.user.id,
+    id: authUserId,
     name: parsed.name,
     email: parsed.email,
     login_id: parsed.login_id,
     role: parsed.role,
-    club_id: parsed.role === "club_admin" ? assignedClubId : null,
+    club_id: primaryClubId,
     status: "active"
   });
-  if (profileError) teamAccessError(profileError.message);
+  if (profileError) {
+    if (shouldDeleteAuthUserOnFailure) await deleteAuthUserSafely(service, authUserId);
+    teamAccessError(databaseSetupMessage(profileError.message));
+  }
   if (parsed.role === "event_ops") {
+    const { error: deleteAccessError } = await service.from("admin_club_access").delete().eq("user_id", authUserId);
+    if (deleteAccessError) {
+      if (shouldDeleteAuthUserOnFailure) await deleteAuthUserSafely(service, authUserId);
+      teamAccessError(databaseSetupMessage(deleteAccessError.message));
+    }
+
     const { error: accessError } = await service
       .from("admin_club_access")
       .insert(assignedClubIds.map((clubId) => ({
-        user_id: data.user.id,
+        user_id: authUserId,
         club_id: clubId
       })));
-    if (accessError) teamAccessError(accessError.message);
+    if (accessError) {
+      if (shouldDeleteAuthUserOnFailure) await deleteAuthUserSafely(service, authUserId);
+      teamAccessError(databaseSetupMessage(accessError.message));
+    }
   }
-  await writeAuditLogSafely({ action: "admin.create_fixed_access", entityType: "user", entityId: data.user.id, diff: { ...parsed, password: "[redacted]" } });
+  await writeAuditLogSafely({ action: "admin.create_fixed_access", entityType: "user", entityId: authUserId, diff: { ...parsed, password: "[redacted]" } });
   revalidatePath("/team-access");
   redirect(`/team-access?created=1&email=${encodeURIComponent(parsed.email)}`);
 }
