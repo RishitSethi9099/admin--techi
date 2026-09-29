@@ -71,6 +71,43 @@ with check (
   )
 );
 
+drop policy if exists "Event ops upload assigned billboard media" on storage.objects;
+create policy "Event ops upload assigned billboard media"
+on storage.objects for insert
+to authenticated
+with check (
+  bucket_id = 'billboard-media'
+  and exists (
+    select 1
+    from public.admin_club_access
+    where user_id = auth.uid()
+      and club_id::text = (storage.foldername(name))[1]
+  )
+);
+
+drop policy if exists "Event ops update assigned billboard media" on storage.objects;
+create policy "Event ops update assigned billboard media"
+on storage.objects for update
+to authenticated
+using (
+  bucket_id = 'billboard-media'
+  and exists (
+    select 1
+    from public.admin_club_access
+    where user_id = auth.uid()
+      and club_id::text = (storage.foldername(name))[1]
+  )
+)
+with check (
+  bucket_id = 'billboard-media'
+  and exists (
+    select 1
+    from public.admin_club_access
+    where user_id = auth.uid()
+      and club_id::text = (storage.foldername(name))[1]
+  )
+);
+
 drop policy if exists "Event ops update assigned event posters" on storage.objects;
 create policy "Event ops update assigned event posters"
 on storage.objects for update

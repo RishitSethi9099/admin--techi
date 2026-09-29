@@ -17,8 +17,25 @@ const billboardSchema = z.object({
   active: z.coerce.boolean().default(false)
 });
 
+const BILLBOARD_VIDEO_MAX_BYTES = 3 * 1024 * 1024;
+const BILLBOARD_POSTER_TYPES = ["image/png", "image/jpeg", "image/webp"];
+
 function safeFileName(name: string) {
   return name.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "upload";
+}
+
+function validateBillboardFile(file: File | null, type: "video" | "poster") {
+  if (!file || file.size === 0) return;
+
+  if (type === "video") {
+    if (file.type !== "video/mp4") throw new Error("Billboard video must be MP4.");
+    if (file.size > BILLBOARD_VIDEO_MAX_BYTES) throw new Error("Billboard video must be under 3 MB.");
+    return;
+  }
+
+  if (!BILLBOARD_POSTER_TYPES.includes(file.type)) {
+    throw new Error("Billboard poster must be PNG, JPG, or WebP.");
+  }
 }
 
 async function uploadMediaFile({
@@ -62,13 +79,19 @@ export async function saveBillboard(formData: FormData) {
     active: formData.get("active") === "on"
   });
   if (profile.role === "club_admin" && parsed.club_id !== profile.club_id) throw new Error("Wrong club scope.");
+  if (profile.role === "event_ops") {
+    const assignedClubIds = await getAssignedClubIds(profile.id);
+    if (!assignedClubIds.includes(parsed.club_id)) throw new Error("Wrong event ops club scope.");
+  }
   const supabase = createSupabaseServerClient();
   const mediaFile = formData.get("media_file");
+  const billboardFile = mediaFile instanceof File ? mediaFile : null;
+  validateBillboardFile(billboardFile, parsed.type);
   const uploadedUrl = await uploadMediaFile({
     supabase,
     bucket: "billboard-media",
     clubId: parsed.club_id,
-    file: mediaFile instanceof File ? mediaFile : null
+    file: billboardFile
   });
   const payload = {
     ...parsed,

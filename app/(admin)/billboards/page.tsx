@@ -1,17 +1,28 @@
-import { CheckCircle2, ImageIcon, Plus, Video } from "lucide-react";
+import { CheckCircle2, ImageIcon, Video } from "lucide-react";
 import { PageTitle } from "@/components/admin/page-title";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { requireProfile } from "@/lib/auth";
-import { approveContent, saveBillboard } from "@/lib/actions/content";
-import { getBillboards, getClubs } from "@/lib/data";
+import { approveContent } from "@/lib/actions/content";
+import { getAssignedClubIds, getBillboards, getClubs } from "@/lib/data";
+import { BillboardForm } from "@/components/admin/billboard-form";
 
 export default async function BillboardsPage() {
   const profile = await requireProfile();
-  const [billboards, clubs] = await Promise.all([getBillboards(), getClubs()]);
-  const visibleClubs = profile.role === "super_admin" ? clubs : clubs.filter((club) => club.id === profile.club_id);
+  const [billboards, clubs, assignedClubIds] = await Promise.all([getBillboards(), getClubs(), profile.role === "event_ops" ? getAssignedClubIds(profile.id) : Promise.resolve([])]);
+  const visibleClubs =
+    profile.role === "super_admin"
+      ? clubs
+      : profile.role === "event_ops"
+        ? clubs.filter((club) => assignedClubIds.includes(club.id))
+        : clubs.filter((club) => club.id === profile.club_id);
   const assignedClub = visibleClubs[0] ?? null;
-  const visibleBillboards = profile.role === "super_admin" ? billboards : billboards.filter((billboard) => billboard.club_id === profile.club_id);
+  const visibleBillboards =
+    profile.role === "super_admin"
+      ? billboards
+      : profile.role === "event_ops"
+        ? billboards.filter((billboard) => assignedClubIds.includes(billboard.club_id))
+        : billboards.filter((billboard) => billboard.club_id === profile.club_id);
 
   return (
     <>
@@ -24,10 +35,22 @@ export default async function BillboardsPage() {
         }
       />
       <Card className="mb-5 p-5">
-        {profile.role !== "super_admin" && assignedClub ? (
+        {profile.role === "club_admin" && assignedClub ? (
           <div className="mb-4 rounded-2xl border border-primary/20 bg-primary-soft px-4 py-3">
             <div className="text-xs font-semibold uppercase tracking-wide text-primary">Your club</div>
             <div className="text-lg font-semibold text-foreground">{assignedClub.name}</div>
+          </div>
+        ) : null}
+        {profile.role === "event_ops" && visibleClubs.length ? (
+          <div className="mb-4 rounded-2xl border border-primary/20 bg-primary-soft px-4 py-3">
+            <div className="text-xs font-semibold uppercase tracking-wide text-primary">Assigned clubs</div>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {visibleClubs.map((club) => (
+                <span key={club.id} className="rounded-full bg-white px-3 py-1 text-sm font-medium text-foreground">
+                  {club.short_name ?? club.name}
+                </span>
+              ))}
+            </div>
           </div>
         ) : null}
         {!assignedClub && profile.role !== "super_admin" ? (
@@ -35,43 +58,7 @@ export default async function BillboardsPage() {
             No club is assigned to this admin yet. Ask the Super Admin to assign a club in Team Access.
           </div>
         ) : (
-          <form action={saveBillboard} className="grid gap-3">
-            {profile.role === "super_admin" ? (
-              <select name="club_id" required className="h-11 rounded-xl border border-border px-3">
-                <option value="">Select club</option>
-                {visibleClubs.map((club) => <option key={club.id} value={club.id}>{club.name}</option>)}
-              </select>
-            ) : (
-              <input type="hidden" name="club_id" value={assignedClub?.id ?? ""} />
-            )}
-            <input name="title" required placeholder="Promo title" className="h-11 rounded-xl border border-border px-3" />
-            <select name="type" className="h-11 rounded-xl border border-border px-3">
-              <option value="poster">Poster</option>
-              <option value="video">Video</option>
-            </select>
-            <label className="rounded-xl border border-dashed border-border bg-white px-4 py-4 text-sm text-muted">
-              <span className="mb-2 block font-medium text-foreground">Upload poster or video</span>
-              <input name="media_file" type="file" accept="image/png,image/jpeg,image/webp,video/mp4,video/webm" className="block w-full text-sm" />
-            </label>
-            <input name="media_url" type="url" placeholder="Optional media URL fallback" className="h-11 rounded-xl border border-border px-3" />
-            <textarea name="about_club" required placeholder="About the club" className="min-h-28 rounded-xl border border-border px-3 py-2" />
-            {profile.role === "super_admin" ? (
-              <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
-                <input name="display_order" type="number" defaultValue={0} min={0} placeholder="Display order" className="h-11 rounded-xl border border-border px-3" />
-                <label className="flex h-11 items-center gap-2 rounded-xl border border-border px-3 text-sm">
-                  <input type="checkbox" name="active" /> Active
-                </label>
-              </div>
-            ) : (
-              <>
-                <input type="hidden" name="display_order" value="0" />
-                <input type="hidden" name="active" value="" />
-              </>
-            )}
-            <button className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-primary px-4 font-semibold text-white">
-              <Plus className="h-4 w-4" /> Submit
-            </button>
-          </form>
+          <BillboardForm role={profile.role} visibleClubs={visibleClubs} assignedClub={assignedClub} />
         )}
       </Card>
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
