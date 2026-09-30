@@ -9,7 +9,8 @@ import { getAssignedClubIds } from "@/lib/data";
 
 const billboardSchema = z.object({
   club_id: z.string().uuid(),
-  title: z.string().min(2),
+  event_slot_id: z.string().uuid().nullable().optional(),
+  title: z.string().min(2).optional(),
   about_club: z.string().min(3),
   type: z.enum(["video", "poster"]),
   media_url: z.string().url().or(z.literal("")).nullable(),
@@ -19,6 +20,14 @@ const billboardSchema = z.object({
 
 const BILLBOARD_VIDEO_MAX_BYTES = 3 * 1024 * 1024;
 const BILLBOARD_POSTER_TYPES = ["image/png", "image/jpeg", "image/webp"];
+
+type BillboardEventSlot = {
+  id: string;
+  club_id: string;
+  event_name: string;
+  event_tier: "major" | "minor";
+  required_media_type: "video" | "poster";
+};
 
 function safeFileName(name: string) {
   return name.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "upload";
@@ -71,6 +80,7 @@ export async function saveBillboard(formData: FormData) {
   }
   const parsed = billboardSchema.parse({
     club_id: formData.get("club_id"),
+    event_slot_id: formData.get("event_slot_id") || null,
     title: formData.get("title"),
     about_club: formData.get("about_club"),
     type: formData.get("type"),
@@ -84,6 +94,20 @@ export async function saveBillboard(formData: FormData) {
     if (!assignedClubIds.includes(parsed.club_id)) throw new Error("Wrong event ops club scope.");
   }
   const supabase = createSupabaseServerClient();
+  let slot: BillboardEventSlot | null = null;
+  if (parsed.event_slot_id) {
+    const { data: slotData, error: slotError } = await supabase
+      .from("event_slots")
+      .select("id,club_id,event_name,event_tier,required_media_type")
+      .eq("id", parsed.event_slot_id)
+      .eq("active", true)
+      .maybeSingle();
+    if (slotError) throw new Error(slotError.message);
+    if (!slotData) throw new Error("Event upload slot was not found.");
+    slot = slotData as BillboardEventSlot;
+    if (slot.club_id !== parsed.club_id) throw new Error("This event slot does not belong to the selected club.");
+    if (slot.required_media_type !== parsed.type) throw new Error(`${slot.event_name} requires a ${slot.required_media_type} upload.`);
+  }
   const mediaFile = formData.get("media_file");
   const billboardFile = mediaFile instanceof File ? mediaFile : null;
   validateBillboardFile(billboardFile, parsed.type);
@@ -95,6 +119,9 @@ export async function saveBillboard(formData: FormData) {
   });
   const payload = {
     ...parsed,
+    title: parsed.title || slot?.event_name || "Event promotion",
+    event_name: slot?.event_name ?? parsed.title ?? null,
+    event_tier: slot?.event_tier ?? null,
     media_url: uploadedUrl ?? parsed.media_url
   };
   if (!payload.media_url) throw new Error("Upload a poster/video file or paste a media URL.");

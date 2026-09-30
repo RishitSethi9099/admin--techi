@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { Plus } from "lucide-react";
 import { saveBillboard } from "@/lib/actions/content";
-import type { AppRole, Club } from "@/lib/supabase/types";
+import type { AppRole, Club, EventSlot } from "@/lib/supabase/types";
 
 const VIDEO_MAX_BYTES = 3 * 1024 * 1024;
 const RATIO_TOLERANCE = 0.08;
@@ -12,26 +12,33 @@ function closeTo(value: number, target: number) {
   return Math.abs(value - target) <= RATIO_TOLERANCE;
 }
 
+function slotLabel(slot: EventSlot) {
+  return slot.event_tier === "major" ? "Major event video" : "Minor event poster";
+}
+
 export function BillboardForm({
   role,
   visibleClubs,
-  assignedClub
+  assignedClub,
+  slot
 }: {
   role: AppRole;
   visibleClubs: Club[];
   assignedClub: Club | null;
+  slot: EventSlot;
 }) {
-  const [type, setType] = useState<"poster" | "video">("poster");
+  const type = slot.required_media_type;
+  const [selectedClubId, setSelectedClubId] = useState(slot.club_id);
   const [fileMessage, setFileMessage] = useState<string | null>(null);
   const [fileOk, setFileOk] = useState(true);
-  const isClubAdmin = role === "club_admin";
   const canChooseClub = role === "super_admin" || role === "event_ops";
+  const selectedClub = visibleClubs.find((club) => club.id === selectedClubId) ?? assignedClub ?? slot.clubs ?? null;
 
   const specs = useMemo(() => {
     if (type === "video") {
-      return "Major event video: MP4, 16:9, about 10 seconds, under 3 MB if possible.";
+      return "Upload MP4 video only: 16:9, about 10 seconds, under 3 MB if possible.";
     }
-    return "Club poster: upload either a tall 1:2 poster or a wide 2:1 poster.";
+    return "Upload poster image only: tall 1:2 or wide 2:1, PNG/JPG/WebP.";
   }, [type]);
 
   async function validateFile(file: File | undefined) {
@@ -104,24 +111,28 @@ export function BillboardForm({
   }
 
   return (
-    <form action={saveBillboard} className="grid gap-3">
+    <form action={saveBillboard} className="grid gap-3 rounded-2xl border border-border bg-white p-4">
+      <div className="rounded-2xl border border-primary/20 bg-primary-soft px-4 py-3">
+        <div className="text-xs font-semibold uppercase tracking-wide text-primary">{slotLabel(slot)}</div>
+        <div className="mt-1 text-lg font-semibold text-foreground">{slot.event_name}</div>
+        <div className="text-sm text-muted">{selectedClub?.name ?? slot.clubs?.name ?? "Assigned club"}</div>
+      </div>
+
       {canChooseClub ? (
-        <select name="club_id" required className="h-11 rounded-xl border border-border px-3">
-          <option value="">Select club</option>
+        <select name="club_id" required value={selectedClubId} onChange={(event) => setSelectedClubId(event.target.value)} className="h-11 rounded-xl border border-border px-3">
           {visibleClubs.map((club) => (
             <option key={club.id} value={club.id}>{club.short_name ?? club.name}</option>
           ))}
         </select>
       ) : (
-        <input type="hidden" name="club_id" value={assignedClub?.id ?? ""} />
+        <input type="hidden" name="club_id" value={assignedClub?.id ?? slot.club_id} />
       )}
-      <input name="title" required placeholder="Promo title" className="h-11 rounded-xl border border-border px-3" />
-      <select name="type" value={type} onChange={(event) => setType(event.target.value as "poster" | "video")} className="h-11 rounded-xl border border-border px-3">
-        <option value="poster">Poster</option>
-        <option value="video">Video</option>
-      </select>
+      <input type="hidden" name="event_slot_id" value={slot.id} />
+      <input type="hidden" name="title" value={slot.event_name} />
+      <input type="hidden" name="type" value={type} />
+
       <label className="rounded-xl border border-dashed border-border bg-white px-4 py-4 text-sm text-muted">
-        <span className="mb-1 block font-medium text-foreground">Upload {type === "video" ? "major event video" : "club poster"}</span>
+        <span className="mb-1 block font-medium text-foreground">Upload {type === "video" ? "video" : "poster"} for {slot.event_name}</span>
         <span className="mb-3 block text-xs text-muted">{specs}</span>
         <input
           name="media_file"
@@ -137,22 +148,22 @@ export function BillboardForm({
         </p>
       ) : null}
       <input name="media_url" type="url" placeholder="Optional media URL fallback" className="h-11 rounded-xl border border-border px-3" />
-      <textarea name="about_club" required placeholder="About the club" className="min-h-28 rounded-xl border border-border px-3 py-2" />
+      <textarea name="about_club" required placeholder="About the club or event" className="min-h-28 rounded-xl border border-border px-3 py-2" />
       {role === "super_admin" ? (
         <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
-          <input name="display_order" type="number" defaultValue={0} min={0} placeholder="Display order" className="h-11 rounded-xl border border-border px-3" />
+          <input name="display_order" type="number" defaultValue={slot.event_number} min={0} placeholder="Display order" className="h-11 rounded-xl border border-border px-3" />
           <label className="flex h-11 items-center gap-2 rounded-xl border border-border px-3 text-sm">
-            <input type="checkbox" name="active" /> Active
+            <input type="checkbox" name="active" defaultChecked /> Active
           </label>
         </div>
       ) : (
         <>
-          <input type="hidden" name="display_order" value="0" />
+          <input type="hidden" name="display_order" value={slot.event_number} />
           <input type="hidden" name="active" value="" />
         </>
       )}
       <button disabled={!fileOk} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-primary px-4 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">
-        <Plus className="h-4 w-4" /> Submit
+        <Plus className="h-4 w-4" /> Submit {type === "video" ? "video" : "poster"}
       </button>
     </form>
   );

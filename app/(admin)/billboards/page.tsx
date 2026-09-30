@@ -4,12 +4,17 @@ import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { requireProfile } from "@/lib/auth";
 import { approveContent } from "@/lib/actions/content";
-import { getAssignedClubIds, getBillboards, getClubs } from "@/lib/data";
+import { getAssignedClubIds, getBillboards, getClubs, getEventSlots } from "@/lib/data";
 import { BillboardForm } from "@/components/admin/billboard-form";
 
 export default async function BillboardsPage() {
   const profile = await requireProfile();
-  const [billboards, clubs, assignedClubIds] = await Promise.all([getBillboards(), getClubs(), profile.role === "event_ops" ? getAssignedClubIds(profile.id) : Promise.resolve([])]);
+  const [billboards, clubs, eventSlots, assignedClubIds] = await Promise.all([
+    getBillboards(),
+    getClubs(),
+    getEventSlots(),
+    profile.role === "event_ops" ? getAssignedClubIds(profile.id) : Promise.resolve([])
+  ]);
   const visibleClubs =
     profile.role === "super_admin"
       ? clubs
@@ -23,6 +28,12 @@ export default async function BillboardsPage() {
       : profile.role === "event_ops"
         ? billboards.filter((billboard) => assignedClubIds.includes(billboard.club_id))
         : billboards.filter((billboard) => billboard.club_id === profile.club_id);
+  const visibleSlots =
+    profile.role === "super_admin"
+      ? eventSlots
+      : profile.role === "event_ops"
+        ? eventSlots.filter((slot) => assignedClubIds.includes(slot.club_id))
+        : eventSlots.filter((slot) => slot.club_id === profile.club_id);
 
   return (
     <>
@@ -57,8 +68,16 @@ export default async function BillboardsPage() {
           <div className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-700">
             No club is assigned to this admin yet. Ask the Super Admin to assign a club in Team Access.
           </div>
+        ) : !visibleSlots.length ? (
+          <div className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-700">
+            No event upload slots are assigned yet. Run the event slot migration from the Excel list.
+          </div>
         ) : (
-          <BillboardForm role={profile.role} visibleClubs={visibleClubs} assignedClub={assignedClub} />
+          <div className="grid gap-4 xl:grid-cols-2">
+            {visibleSlots.map((slot) => (
+              <BillboardForm key={slot.id} role={profile.role} visibleClubs={visibleClubs.filter((club) => club.id === slot.club_id)} assignedClub={visibleClubs.find((club) => club.id === slot.club_id) ?? assignedClub} slot={slot} />
+            ))}
+          </div>
         )}
       </Card>
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -70,8 +89,8 @@ export default async function BillboardsPage() {
             <div className="space-y-3 p-5">
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <div className="font-semibold">{billboard.title ?? "Untitled promotion"}</div>
-                  <div className="text-sm text-muted">{billboard.clubs?.name ?? "Unknown club"} · {billboard.type}</div>
+                  <div className="font-semibold">{billboard.event_name ?? billboard.title ?? "Untitled promotion"}</div>
+                  <div className="text-sm text-muted">{billboard.clubs?.name ?? "Unknown club"} · {billboard.event_tier ?? billboard.type}</div>
                 </div>
                 <Badge tone={billboard.status === "approved" ? "green" : billboard.status === "rejected" ? "red" : "amber"}>{billboard.status}</Badge>
               </div>

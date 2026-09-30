@@ -7,6 +7,7 @@ import type {
   Club,
   CrashLog,
   Event,
+  EventSlot,
   Notification,
   Profile,
   TeamMember
@@ -106,9 +107,30 @@ export async function getBillboards() {
   const supabase = createSupabaseServerClient();
   const { data } = await supabase
     .from("billboards")
-    .select("*,clubs(id,name,slug,logo_url)")
+    .select("*,clubs(id,name,slug,short_name,logo_url),event_slots(id,club_id,event_number,event_name,event_tier,required_media_type,active)")
     .order("updated_at", { ascending: false });
   return (data ?? []) as Billboard[];
+}
+
+export async function getEventSlots() {
+  if (!hasSupabaseEnv()) {
+    return [] as EventSlot[];
+  }
+
+  const supabase = createSupabaseServerClient();
+  const { data, error } = await supabase
+    .from("event_slots")
+    .select("id,club_id,event_number,event_name,event_tier,required_media_type,active,clubs(id,name,slug,short_name,logo_url)")
+    .eq("active", true)
+    .order("event_number", { ascending: true });
+  if (error) {
+    if (error.message.includes("event_slots")) return [] as EventSlot[];
+    throw new Error(error.message);
+  }
+  return (data ?? []).map((slot) => {
+    const club = Array.isArray(slot.clubs) ? slot.clubs[0] : slot.clubs;
+    return { ...slot, clubs: club ?? null };
+  }) as unknown as EventSlot[];
 }
 
 export async function getTeamMembers() {

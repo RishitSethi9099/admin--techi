@@ -89,10 +89,45 @@ export async function reviewApprovalRequest(formData: FormData) {
   if (readError) throw new Error(readError.message);
   if (request.requested_by === profile.id) throw new Error("Super admins cannot approve their own requests.");
 
+  let publishedResourceId = request.resource_id as string | null;
+  if (parsed.status === "approved" && !request.resource_id) {
+    if (request.resource_type === "billboard") {
+      const { data: billboard, error: publishError } = await supabase
+        .from("billboards")
+        .insert({
+          ...(request.proposed_value as Record<string, unknown>),
+          status: "approved",
+          active: true,
+          approved_by: profile.id,
+          approved_at: new Date().toISOString()
+        })
+        .select("id")
+        .single();
+      if (publishError) throw new Error(publishError.message);
+      publishedResourceId = billboard.id;
+    }
+
+    if (request.resource_type === "event") {
+      const { data: event, error: publishError } = await supabase
+        .from("events")
+        .insert({
+          ...(request.proposed_value as Record<string, unknown>),
+          status: "approved",
+          approved_by: profile.id,
+          approved_at: new Date().toISOString()
+        })
+        .select("id")
+        .single();
+      if (publishError) throw new Error(publishError.message);
+      publishedResourceId = event.id;
+    }
+  }
+
   const { error } = await supabase
     .from("approval_requests")
     .update({
       status: parsed.status,
+      resource_id: publishedResourceId,
       reviewed_by: profile.id,
       reviewed_at: new Date().toISOString(),
       review_note: parsed.review_note || null

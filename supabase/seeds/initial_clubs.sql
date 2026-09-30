@@ -26,6 +26,7 @@ values
   ('Her Campus at MUJ', 'her-campus-at-muj', 'Her Campus', 'Her Campus at MUJ club.'),
   ('Hotel Management Dept X Epicurean', 'hotel-management-dept-x-epicurean', 'HM X Epicurean', 'Hotel Management Dept X Epicurean club.'),
   ('IEEE CIS', 'ieee-cis', 'IEEE CIS', 'IEEE CIS club.'),
+  ('IEEE CS', 'ieee-cs', 'IEEE CS', 'IEEE Computer Society club.'),
   ('IEEE MTT-S, IEEE APS and IEEE AESS', 'ieee-mtt-s-aps-aess', 'IEEE MTT/APS/AESS', 'IEEE MTT-S, IEEE APS and IEEE AESS club.'),
   ('IEEE RAS SBC', 'ieee-ras', 'IEEE RAS SBC', 'IEEE RAS SBC club.'),
   ('IEEE SB MUJ', 'ieee-sb', 'IEEE SB MUJ', 'IEEE SB MUJ club.'),
@@ -63,3 +64,4 @@ set
   short_name = excluded.short_name,
   description = excluded.description,
   updated_at = now();
+

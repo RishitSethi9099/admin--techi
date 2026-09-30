@@ -37,6 +37,9 @@ export type Club = {
 export type Billboard = {
   id: string;
   club_id: string;
+  event_slot_id?: string | null;
+  event_name?: string | null;
+  event_tier?: "major" | "minor" | null;
   title?: string | null;
   about_club?: string | null;
   type: BillboardType;
@@ -50,6 +53,18 @@ export type Billboard = {
   approved_at: string | null;
   created_at: string;
   updated_at: string;
+  clubs?: Club | null;
+  event_slots?: EventSlot | null;
+};
+
+export type EventSlot = {
+  id: string;
+  club_id: string;
+  event_number: number;
+  event_name: string;
+  event_tier: "major" | "minor";
+  required_media_type: BillboardType;
+  active: boolean;
   clubs?: Club | null;
 };
 
