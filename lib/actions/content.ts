@@ -72,11 +72,11 @@ async function uploadMediaFile({
   return data.publicUrl;
 }
 
-export async function saveBillboard(formData: FormData) {
+export async function saveBillboard(_previousState: { ok: boolean; message: string } | null, formData: FormData) {
   const profile = await requireProfile();
   if (!hasSupabaseEnv()) {
     revalidatePath("/billboards");
-    return;
+    return { ok: true, message: "Submitted. Wait for Super Admin approval." };
   }
   const parsed = billboardSchema.parse({
     club_id: formData.get("club_id"),
@@ -88,10 +88,10 @@ export async function saveBillboard(formData: FormData) {
     display_order: formData.get("display_order") || 0,
     active: formData.get("active") === "on"
   });
-  if (profile.role === "club_admin" && parsed.club_id !== profile.club_id) throw new Error("Wrong club scope.");
+  if (profile.role === "club_admin" && parsed.club_id !== profile.club_id) return { ok: false, message: "Wrong club scope." };
   if (profile.role === "event_ops") {
     const assignedClubIds = await getAssignedClubIds(profile.id);
-    if (!assignedClubIds.includes(parsed.club_id)) throw new Error("Wrong event ops club scope.");
+    if (!assignedClubIds.includes(parsed.club_id)) return { ok: false, message: "Wrong event ops club scope." };
   }
   const supabase = createSupabaseServerClient();
   let slot: BillboardEventSlot | null = null;
@@ -102,15 +102,19 @@ export async function saveBillboard(formData: FormData) {
       .eq("id", parsed.event_slot_id)
       .eq("active", true)
       .maybeSingle();
-    if (slotError) throw new Error(slotError.message);
-    if (!slotData) throw new Error("Event upload slot was not found.");
+    if (slotError) return { ok: false, message: slotError.message };
+    if (!slotData) return { ok: false, message: "Event upload slot was not found." };
     slot = slotData as BillboardEventSlot;
-    if (slot.club_id !== parsed.club_id) throw new Error("This event slot does not belong to the selected club.");
-    if (slot.required_media_type !== parsed.type) throw new Error(`${slot.event_name} requires a ${slot.required_media_type} upload.`);
+    if (slot.club_id !== parsed.club_id) return { ok: false, message: "This event slot does not belong to the selected club." };
+    if (slot.required_media_type !== parsed.type) return { ok: false, message: `${slot.event_name} requires a ${slot.required_media_type} upload.` };
   }
   const mediaFile = formData.get("media_file");
   const billboardFile = mediaFile instanceof File ? mediaFile : null;
-  validateBillboardFile(billboardFile, parsed.type);
+  try {
+    validateBillboardFile(billboardFile, parsed.type);
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : "Invalid upload file." };
+  }
   const uploadedUrl = await uploadMediaFile({
     supabase,
     bucket: "billboard-media",
@@ -124,7 +128,7 @@ export async function saveBillboard(formData: FormData) {
     event_tier: slot?.event_tier ?? null,
     media_url: uploadedUrl ?? parsed.media_url
   };
-  if (!payload.media_url) throw new Error("Upload a poster/video file or paste a media URL.");
+  if (!payload.media_url) return { ok: false, message: "Upload a poster/video file or paste a media URL." };
 
   if (profile.role !== "super_admin") {
     const { data, error } = await supabase
@@ -144,16 +148,17 @@ export async function saveBillboard(formData: FormData) {
       })
       .select("id")
       .single();
-    if (error) throw new Error(error.message);
+    if (error) return { ok: false, message: error.message };
     await writeAuditLog({ action: "approval_request.create", entityType: "approval_request", entityId: data.id, diff: payload });
     revalidatePath("/billboards");
     revalidatePath("/approvals");
-    return;
+    return { ok: true, message: "Submitted. Wait for Super Admin approval." };
   }
   const { data, error } = await supabase.from("billboards").insert(payload).select("id").single();
-  if (error) throw new Error(error.message);
+  if (error) return { ok: false, message: error.message };
   await writeAuditLog({ action: "create", entityType: "billboard", entityId: data.id, diff: payload });
   revalidatePath("/billboards");
+  return { ok: true, message: "Billboard published." };
 }
 
 const approvalSchema = z.object({
@@ -269,3 +274,4 @@ export async function saveEvent(formData: FormData) {
   await writeAuditLog({ action: "create", entityType: "event", entityId: data.id, diff: payload });
   revalidatePath("/events");
 }
+

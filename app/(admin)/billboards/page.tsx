@@ -4,15 +4,16 @@ import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { requireProfile } from "@/lib/auth";
 import { approveContent } from "@/lib/actions/content";
-import { getAssignedClubIds, getBillboards, getClubs, getEventSlots } from "@/lib/data";
+import { getApprovalRequests, getAssignedClubIds, getBillboards, getClubs, getEventSlots } from "@/lib/data";
 import { BillboardForm } from "@/components/admin/billboard-form";
 
 export default async function BillboardsPage() {
   const profile = await requireProfile();
-  const [billboards, clubs, eventSlots, assignedClubIds] = await Promise.all([
+  const [billboards, clubs, eventSlots, approvals, assignedClubIds] = await Promise.all([
     getBillboards(),
     getClubs(),
     getEventSlots(),
+    getApprovalRequests(),
     profile.role === "event_ops" ? getAssignedClubIds(profile.id) : Promise.resolve([])
   ]);
   const visibleClubs =
@@ -34,6 +35,29 @@ export default async function BillboardsPage() {
       : profile.role === "event_ops"
         ? eventSlots.filter((slot) => assignedClubIds.includes(slot.club_id))
         : eventSlots.filter((slot) => slot.club_id === profile.club_id);
+
+  const billboardSubmissions = new Map<string, { status: typeof approvals[number]["status"]; message: string }>();
+  for (const request of approvals) {
+    if (request.resource_type !== "billboard" || request.requested_by !== profile.id) continue;
+    const eventSlotId = typeof request.proposed_value?.event_slot_id === "string" ? request.proposed_value.event_slot_id : null;
+    if (!eventSlotId || billboardSubmissions.has(eventSlotId)) continue;
+    billboardSubmissions.set(eventSlotId, {
+      status: request.status,
+      message:
+        request.status === "approved"
+          ? "Approved and published."
+          : request.status === "rejected"
+            ? "Rejected. Edit and resubmit this slot."
+            : "Submitted. Wait for Super Admin approval."
+    });
+  }
+  for (const billboard of visibleBillboards) {
+    if (!billboard.event_slot_id || billboardSubmissions.has(billboard.event_slot_id)) continue;
+    billboardSubmissions.set(billboard.event_slot_id, {
+      status: billboard.status,
+      message: billboard.status === "approved" ? "Approved and published." : billboard.status === "rejected" ? "Rejected. Edit and resubmit this slot." : "Submitted. Wait for Super Admin approval."
+    });
+  }
 
   return (
     <>
@@ -75,7 +99,7 @@ export default async function BillboardsPage() {
         ) : (
           <div className="grid gap-4 xl:grid-cols-2">
             {visibleSlots.map((slot) => (
-              <BillboardForm key={slot.id} role={profile.role} visibleClubs={visibleClubs.filter((club) => club.id === slot.club_id)} assignedClub={visibleClubs.find((club) => club.id === slot.club_id) ?? assignedClub} slot={slot} />
+              <BillboardForm key={slot.id} role={profile.role} visibleClubs={visibleClubs.filter((club) => club.id === slot.club_id)} assignedClub={visibleClubs.find((club) => club.id === slot.club_id) ?? assignedClub} slot={slot} submission={billboardSubmissions.get(slot.id) ?? null} />
             ))}
           </div>
         )}
@@ -115,3 +139,7 @@ export default async function BillboardsPage() {
     </>
   );
 }
+
+
+
+
