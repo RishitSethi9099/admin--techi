@@ -118,9 +118,22 @@ async function resolveEmailRecipients(input: {
 
   const { data } = await query;
   const databaseRecipients = (data ?? []).map((row) => row.email).filter(Boolean);
+  let eventOpsRecipients: string[] = [];
+  if (clubId && isClubResource) {
+    const { data: assignedOps } = await input.supabase
+      .from("admin_club_access")
+      .select("users(email,status,id_banned,ip_banned)")
+      .eq("club_id", clubId);
+    eventOpsRecipients = (assignedOps ?? [])
+      .map((row) => {
+        const user = Array.isArray(row.users) ? row.users[0] : row.users;
+        return user && user.status === "active" && !user.id_banned && !user.ip_banned ? user.email : null;
+      })
+      .filter(Boolean) as string[];
+  }
   const fallbackRecipients = !clubId && process.env.SUPER_ADMIN_ALERT_EMAIL ? [process.env.SUPER_ADMIN_ALERT_EMAIL] : [];
 
-  return Array.from(new Set([...databaseRecipients, ...fallbackRecipients]));
+  return Array.from(new Set([...databaseRecipients, ...eventOpsRecipients, ...fallbackRecipients]));
 }
 
 async function sendEmail(input: { severity: string; message: string; pageUrl: string | null; recipients: string[] }) {
