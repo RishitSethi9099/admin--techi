@@ -1,6 +1,7 @@
 "use client";
 
-import { useActionState, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useFormState } from "react-dom";
 import { CheckCircle2, Edit3, Plus } from "lucide-react";
 import { saveBillboard } from "@/lib/actions/content";
 import type { AppRole, ApprovalStatus, Club, EventSlot } from "@/lib/supabase/types";
@@ -33,7 +34,7 @@ export function BillboardForm({
   const [selectedClubId, setSelectedClubId] = useState(slot.club_id);
   const [fileMessage, setFileMessage] = useState<string | null>(null);
   const [fileOk, setFileOk] = useState(true);
-  const [state, formAction, isPending] = useActionState(saveBillboard, null);
+  const [state, formAction] = useFormState(saveBillboard, null);
   const [isEditing, setIsEditing] = useState(!submission);
   const formRef = useRef<HTMLFormElement>(null);
   const canChooseClub = role === "super_admin" || role === "event_ops";
@@ -205,11 +206,13 @@ export function BillboardForm({
           {state && !state.ok ? (
             <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{state.message}</p>
           ) : null}
-          <button disabled={!fileOk || isPending} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-primary px-4 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">
-            <Plus className="h-4 w-4" /> {isPending ? "Submitting..." : `Submit ${type === "video" ? "video" : "poster"}`}
+          <button disabled={!fileOk} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-primary px-4 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">
+            <Plus className="h-4 w-4" /> Submit {type === "video" ? "video" : "poster"}
           </button>
         </form>
       )}
     </div>
   );
 }
+
+
