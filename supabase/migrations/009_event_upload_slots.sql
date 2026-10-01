@@ -1,5 +1,4 @@
 -- Event-specific upload slots imported from Untitled spreadsheet.xlsx.
-"
 
 insert into public.clubs (name, slug, short_name, description)
 values ('IEEE CS', 'ieee-cs', 'IEEE CS', 'IEEE Computer Society club.')
@@ -9,7 +8,7 @@ set
   short_name = excluded.short_name,
   description = excluded.description,
   updated_at = now();
-"
+
 create table if not exists public.event_slots (
   id uuid primary key default gen_random_uuid(),
   club_id uuid not null references public.clubs(id) on delete cascade,
