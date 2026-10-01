@@ -1,7 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useFormState } from "react-dom";
+import { useMemo, useRef, useState, type FormEvent } from "react";
 import { CheckCircle2, Edit3, Plus } from "lucide-react";
 import { saveBillboard } from "@/lib/actions/content";
 import type { AppRole, ApprovalStatus, Club, EventSlot } from "@/lib/supabase/types";
@@ -34,21 +33,29 @@ export function BillboardForm({
   const [selectedClubId, setSelectedClubId] = useState(slot.club_id);
   const [fileMessage, setFileMessage] = useState<string | null>(null);
   const [fileOk, setFileOk] = useState(true);
-  const [state, formAction] = useFormState(saveBillboard, null);
+  const [state, setState] = useState<{ ok: boolean; message: string } | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [isEditing, setIsEditing] = useState(!submission);
   const formRef = useRef<HTMLFormElement>(null);
   const canChooseClub = role === "super_admin" || role === "event_ops";
   const selectedClub = visibleClubs.find((club) => club.id === selectedClubId) ?? assignedClub ?? slot.clubs ?? null;
 
-  useEffect(() => {
-    if (state?.ok) {
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!fileOk || isSubmitting) return;
+    setIsSubmitting(true);
+    setState(null);
+    const result = await saveBillboard(null, new FormData(event.currentTarget));
+    setState(result);
+    setIsSubmitting(false);
+    if (result.ok) {
       formRef.current?.reset();
       setFileMessage(null);
       setFileOk(true);
       setIsEditing(false);
     }
-  }, [state]);
-
+  }
   const statusMessage = state?.ok ? state.message : submission?.message;
   const statusTone =
     state?.ok || submission?.status === "pending" || submission?.status === "approved"
@@ -158,7 +165,7 @@ export function BillboardForm({
           <Edit3 className="h-4 w-4" /> Edit submission
         </button>
       ) : (
-        <form ref={formRef} action={formAction} className="grid gap-3">
+        <form ref={formRef} onSubmit={handleSubmit} className="grid gap-3">
           {canChooseClub ? (
             <select name="club_id" required value={selectedClubId} onChange={(event) => setSelectedClubId(event.target.value)} className="h-11 rounded-xl border border-border px-3">
               {visibleClubs.map((club) => (
@@ -214,5 +221,9 @@ export function BillboardForm({
     </div>
   );
 }
+
+
+
+
 
 
