@@ -177,14 +177,35 @@ export async function getEvents() {
   return (data ?? []) as Event[];
 }
 
-export async function getCrashLogs() {
+export async function getCrashLogs(options: { clubId?: string | null; scope?: "club" | "platform" | "all"; status?: "open" | "fixed" | "all" } = {}) {
   if (!hasSupabaseEnv()) {
     return [] as CrashLog[];
   }
 
+  // Row-level security already limits club admins / Event Ops to their own clubs' errors.
   const supabase = createSupabaseServerClient();
-  const { data } = await supabase.from("crash_logs").select("*").order("created_at", { ascending: false }).limit(50);
-  return (data ?? []) as CrashLog[];
+  const build = (columns: string) => {
+    let query = supabase.from("crash_logs").select(columns).order("last_seen_at", { ascending: false }).limit(100);
+    if (options.status === "open") query = query.eq("resolved", false);
+    else if (options.status === "fixed") query = query.eq("resolved", true);
+    if (options.clubId) query = query.eq("club_id", options.clubId);
+    else if (options.scope === "platform") query = query.is("club_id", null);
+    else if (options.scope === "club") query = query.not("club_id", "is", null);
+    return query;
+  };
+  const { data, error } = await build("*,clubs(name,short_name)");
+  if (!error) return (data ?? []) as unknown as CrashLog[];
+  // Before migration 012 there is no club_id column to filter or join on.
+  const { data: fallback } = await supabase.from("crash_logs").select("*").order("created_at", { ascending: false }).limit(100);
+  return (fallback ?? []) as CrashLog[];
+}
+
+/** Open errors this person may see (row-level security scopes it to their clubs). */
+export async function getOpenErrorCount() {
+  if (!hasSupabaseEnv()) return 0;
+  const supabase = createSupabaseServerClient();
+  const { count, error } = await supabase.from("crash_logs").select("id", { count: "exact", head: true }).eq("resolved", false);
+  return error ? 0 : count ?? 0;
 }
 
 export async function getAuditLogs() {

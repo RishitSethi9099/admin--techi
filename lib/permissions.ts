@@ -49,7 +49,7 @@ const rolePermissions: Record<AppRole, Permission[]> = {
     "approvals:request",
     "errors:read"
   ],
-  event_ops: ["dashboard:ops", "events:read", "events:operate", "events:write_request", "approvals:request"]
+  event_ops: ["dashboard:ops", "events:read", "events:operate", "events:write_request", "approvals:request", "errors:read"]
 };
 
 export function hasPermission(role: AppRole, permission: Permission) {

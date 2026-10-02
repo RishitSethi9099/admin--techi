@@ -1,37 +1,111 @@
+import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
-import { Resend } from "resend";
 import { createServiceRoleClient, hasSupabaseEnv } from "@/lib/supabase/server";
-import type { AppRole } from "@/lib/supabase/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+// Error reports arrive from the public website (browsers, so CORS is needed),
+// Sentry and uptime monitors. Repeats of the same open problem are grouped into
+// one row (frequency + last_seen_at) instead of a new row per visitor.
+// Errors are shown only in the admin portal (Errors page + sidebar count),
+// scoped to each club. No emails or chat messages are sent.
+
+const CLUB_RESOURCES = ["billboard", "billboards", "event", "events", "schedule", "venue", "poster", "video"];
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const GROUP_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+function corsHeaders() {
+  return {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, x-techi-webhook-secret, x-webhook-secret",
+    "Access-Control-Max-Age": "86400"
+  };
+}
+
+function reply(body: Record<string, unknown>, status = 200) {
+  return NextResponse.json(body, { status, headers: corsHeaders() });
+}
+
+function text(value: unknown, max: number) {
+  if (value === null || value === undefined) return null;
+  const str = typeof value === "string" ? value : JSON.stringify(value);
+  return str.length > max ? `${str.slice(0, max - 1)}…` : str;
+}
+
+function uuidOrNull(value: unknown) {
+  return typeof value === "string" && UUID.test(value) ? value : null;
+}
+
+export async function OPTIONS() {
+  return new NextResponse(null, { status: 204, headers: corsHeaders() });
+}
+
 export async function POST(request: Request) {
   const secret = process.env.CRASH_WEBHOOK_SECRET;
-  if (secret && request.headers.get("x-techi-webhook-secret") !== secret) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const sentSecret = request.headers.get("x-techi-webhook-secret") ?? request.headers.get("x-webhook-secret");
+  if (secret && sentSecret !== secret) {
+    return reply({ error: "Unauthorized" }, 401);
   }
 
-  const payload = await request.json();
+  let payload: Record<string, any>;
+  try {
+    payload = await request.json();
+    if (!payload || typeof payload !== "object") throw new Error("not an object");
+  } catch {
+    return reply({ error: "Body must be JSON" }, 400);
+  }
   if (!hasSupabaseEnv() || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
-    return NextResponse.json({ ok: true, demo: true, payload });
+    return reply({ ok: true, demo: true });
   }
 
-  const source = payload.source ?? (payload.monitorName ? "uptime" : "sentry");
-  const message = payload.message ?? payload.error?.message ?? payload.incident?.name ?? "Unhandled service alert";
-  const errorType = payload.error_type ?? payload.error?.type ?? payload.incident?.id ?? message;
-  const severity = payload.severity ?? payload.level ?? (payload.status === "down" ? "critical" : "warning");
-  const pageUrl = payload.page_url ?? payload.url ?? payload.event?.request?.url ?? null;
-  const route = payload.route ?? payload.path ?? payload.event?.request?.url ?? null;
-  const requestId = request.headers.get("x-request-id") ?? payload.request_id ?? payload.event?.event_id ?? null;
-  const resourceType = payload.resource_type ?? payload.entity_type ?? payload.type ?? null;
-  const resourceId = payload.resource_id ?? payload.entity_id ?? payload.billboard_id ?? payload.event_id ?? null;
-  const clubId = payload.club_id ?? null;
+  const origin = request.headers.get("origin");
+  const source = text(payload.source ?? (payload.monitorName ? "uptime" : origin ? "website" : "sentry"), 40)!;
+  const message = text(payload.message ?? payload.error?.message ?? payload.incident?.name ?? "Unhandled service alert", 1000)!;
+  const errorType = text(payload.error_type ?? payload.error?.type ?? payload.incident?.id ?? message, 120)!;
+  const severity = text(payload.severity ?? payload.level ?? (payload.status === "down" ? "critical" : "warning"), 20)!;
+  const pageUrl = text(payload.page_url ?? payload.url ?? payload.event?.request?.url ?? null, 500);
+  const route = text(payload.route ?? payload.path ?? payload.event?.request?.url ?? null, 500);
+  const requestId = text(request.headers.get("x-request-id") ?? payload.request_id ?? payload.event?.event_id ?? null, 120);
+  const resourceType = text(payload.resource_type ?? payload.entity_type ?? payload.type ?? null, 40)?.toLowerCase() ?? null;
+  const resourceId = text(payload.resource_id ?? payload.entity_id ?? payload.billboard_id ?? payload.event_id ?? null, 200);
 
   const supabase = createServiceRoleClient();
-  const { data: log, error } = await supabase
+  const clubId = await resolveClubId({ supabase, clubId: payload.club_id ?? payload.clubId, resourceType, resourceId });
+  const fingerprint = createHash("sha1").update([source, errorType, clubId ?? "", resourceId ?? "", message].join("|")).digest("hex");
+  const now = new Date();
+
+  const metadata = {
+    ...payload,
+    origin,
+    user_agent: text(request.headers.get("user-agent"), 300),
+    resource_type: resourceType,
+    resource_id: resourceId,
+    club_id: clubId
+  };
+
+  // Same open problem seen recently? Count it instead of adding a row.
+  const { data: existing } = await supabase
     .from("crash_logs")
-    .insert({
+    .select("id,frequency")
+    .eq("fingerprint", fingerprint)
+    .eq("resolved", false)
+    .gte("last_seen_at", new Date(now.getTime() - GROUP_WINDOW_MS).toISOString())
+    .order("last_seen_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  let logId: string | null = null;
+  if (existing) {
+    const { error } = await supabase
+      .from("crash_logs")
+      .update({ frequency: (existing.frequency ?? 1) + 1, last_seen_at: now.toISOString(), page_url: pageUrl })
+      .eq("id", existing.id);
+    if (error) return reply({ error: error.message }, 500);
+    logId = existing.id;
+  } else {
+    const row = {
       severity,
       message,
       page_url: pageUrl,
@@ -40,118 +114,44 @@ export async function POST(request: Request) {
       environment: process.env.VERCEL_ENV ?? process.env.NODE_ENV ?? "unknown",
       route,
       http_status: payload.http_status ?? payload.status_code ?? payload.event?.contexts?.response?.status_code ?? null,
-      stack_trace: payload.stack_trace ?? payload.exception?.values?.[0]?.stacktrace ?? null,
-      first_seen_at: new Date().toISOString(),
-      last_seen_at: new Date().toISOString(),
+      stack_trace: text(payload.stack_trace ?? payload.exception?.values?.[0]?.stacktrace ?? null, 8000),
+      first_seen_at: now.toISOString(),
+      last_seen_at: now.toISOString(),
       request_id: requestId,
       response_time_ms: payload.response_time_ms ?? payload.responseTime ?? null,
-      metadata: {
-        ...payload,
-        resource_type: resourceType,
-        resource_id: resourceId,
-        club_id: clubId
-      }
-    })
-    .select("id")
-    .single();
-
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-
-  const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
-  const { data: existing } = await supabase
-    .from("crash_alert_deliveries")
-    .select("last_sent_at")
-    .eq("error_type", errorType)
-    .maybeSingle();
-
-  const shouldSend = !existing || existing.last_sent_at < tenMinutesAgo;
-  if (shouldSend) {
-    await supabase.from("crash_alert_deliveries").upsert({ error_type: errorType, last_sent_at: new Date().toISOString() });
-    const recipients = await resolveEmailRecipients({
-      supabase,
-      severity,
-      resourceType,
-      resourceId,
-      clubId
-    });
-    await sendEmail({ severity, message, pageUrl, recipients });
-    await pingDiscord({ severity, message, pageUrl });
+      metadata,
+      club_id: clubId,
+      fingerprint
+    };
+    let inserted = await supabase.from("crash_logs").insert(row).select("id").single();
+    if (inserted.error?.code === "42703") {
+      // migration 012 not applied yet: store without the new columns (club stays in metadata)
+      const { club_id: _club, fingerprint: _fp, ...legacyRow } = row;
+      inserted = await supabase.from("crash_logs").insert(legacyRow).select("id").single();
+    }
+    if (inserted.error) return reply({ error: inserted.error.message }, 500);
+    logId = inserted.data?.id ?? null;
   }
 
-  return NextResponse.json({ ok: true, id: log?.id, notified: shouldSend });
+  return reply({ ok: true, id: logId, grouped: Boolean(existing), club_id: clubId });
 }
 
 type SupabaseServiceClient = ReturnType<typeof createServiceRoleClient>;
 
-async function resolveEmailRecipients(input: {
-  supabase: SupabaseServiceClient;
-  severity: string;
-  resourceType: unknown;
-  resourceId: unknown;
-  clubId: unknown;
-}) {
-  const explicitClubId = typeof input.clubId === "string" && input.clubId.length ? input.clubId : null;
-  const resourceType = typeof input.resourceType === "string" ? input.resourceType.toLowerCase() : "";
-  const resourceId = typeof input.resourceId === "string" && input.resourceId.length ? input.resourceId : null;
-  const isClubResource = ["billboard", "billboards", "event", "events", "schedule", "venue"].includes(resourceType);
-
-  let clubId = explicitClubId;
-  if (!clubId && resourceId && ["billboard", "billboards"].includes(resourceType)) {
-    const { data } = await input.supabase.from("billboards").select("club_id").eq("id", resourceId).maybeSingle();
-    clubId = data?.club_id ?? null;
+/** Works out which club an error belongs to: the club id sent, or the owner of the billboard/event. */
+async function resolveClubId(input: { supabase: SupabaseServiceClient; clubId: unknown; resourceType: string | null; resourceId: string | null }) {
+  const explicit = uuidOrNull(input.clubId);
+  if (explicit) {
+    const { data } = await input.supabase.from("clubs").select("id").eq("id", explicit).maybeSingle();
+    if (data?.id) return data.id as string;
   }
-  if (!clubId && resourceId && ["event", "events", "schedule", "venue"].includes(resourceType)) {
-    const { data } = await input.supabase.from("events").select("club_id").eq("id", resourceId).maybeSingle();
-    clubId = data?.club_id ?? null;
+  const resourceId = uuidOrNull(input.resourceId);
+  if (!resourceId || (input.resourceType && !CLUB_RESOURCES.includes(input.resourceType))) return null;
+  // The website labels screen videos "event" even though they are billboards, so check both.
+  const tables = input.resourceType && ["event", "events", "schedule", "venue"].includes(input.resourceType) ? ["events", "billboards"] : ["billboards", "events"];
+  for (const table of tables) {
+    const { data } = await input.supabase.from(table).select("club_id").eq("id", resourceId).maybeSingle();
+    if (data?.club_id) return data.club_id as string;
   }
-
-  const roles: AppRole[] = clubId && isClubResource ? ["club_admin"] : ["super_admin"];
-  const query = input.supabase
-    .from("users")
-    .select("email")
-    .eq("status", "active")
-    .eq("id_banned", false)
-    .eq("ip_banned", false)
-    .in("role", roles);
-
-  if (clubId && isClubResource) query.eq("club_id", clubId);
-
-  const { data } = await query;
-  const databaseRecipients = (data ?? []).map((row) => row.email).filter(Boolean);
-  let eventOpsRecipients: string[] = [];
-  if (clubId && isClubResource) {
-    const { data: assignedOps } = await input.supabase
-      .from("admin_club_access")
-      .select("users(email,status,id_banned,ip_banned)")
-      .eq("club_id", clubId);
-    eventOpsRecipients = (assignedOps ?? [])
-      .map((row) => {
-        const user = Array.isArray(row.users) ? row.users[0] : row.users;
-        return user && user.status === "active" && !user.id_banned && !user.ip_banned ? user.email : null;
-      })
-      .filter(Boolean) as string[];
-  }
-  const fallbackRecipients = !clubId && process.env.SUPER_ADMIN_ALERT_EMAIL ? [process.env.SUPER_ADMIN_ALERT_EMAIL] : [];
-
-  return Array.from(new Set([...databaseRecipients, ...eventOpsRecipients, ...fallbackRecipients]));
-}
-
-async function sendEmail(input: { severity: string; message: string; pageUrl: string | null; recipients: string[] }) {
-  if (!process.env.RESEND_API_KEY || !input.recipients.length) return;
-  const resend = new Resend(process.env.RESEND_API_KEY);
-  await resend.emails.send({
-    from: process.env.RESEND_FROM_EMAIL || "onboarding@resend.dev",
-    to: input.recipients,
-    subject: `[Techi] ${input.severity} alert`,
-    html: `<h2>Techi alert</h2><p><strong>${input.severity}</strong></p><p>${input.message}</p><p>${input.pageUrl ?? ""}</p>`
-  });
-}
-
-async function pingDiscord(input: { severity: string; message: string; pageUrl: string | null }) {
-  if (!process.env.DISCORD_WEBHOOK_URL) return;
-  await fetch(process.env.DISCORD_WEBHOOK_URL, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ content: `Techi ${input.severity}: ${input.message}${input.pageUrl ? ` (${input.pageUrl})` : ""}` })
-  });
+  return null;
 }

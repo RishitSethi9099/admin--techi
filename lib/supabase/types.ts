@@ -113,6 +113,8 @@ export type CrashLog = {
   frequency?: number;
   first_seen_at?: string | null;
   last_seen_at?: string | null;
+  club_id?: string | null;
+  clubs?: { name: string; short_name: string | null } | null;
   metadata: Record<string, unknown>;
   created_at: string;
 };

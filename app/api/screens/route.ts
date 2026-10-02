@@ -4,6 +4,7 @@ import { MAJOR_SCREEN_COUNT, currentOrder, loadRotation, nextRotationAt, screenL
 
 type ScreenEventRow = {
   id: string;
+  club_id?: string | null;
   title: string;
   description: string | null;
   start_datetime?: string | null;
@@ -22,6 +23,7 @@ type ScreenEventRow = {
 
 type ScreenBillboardRow = {
   id: string;
+  club_id?: string | null;
   event_slot_id?: string | null;
   title?: string | null;
   about_club?: string | null;
@@ -86,8 +88,12 @@ function posterPath(event: ScreenEventRow, key: "poster_tall_url" | "poster_wide
 
 type ScreenRotation = { settings: RotationSettings; majorSlotIds: string[] } | null;
 
+// id + club_id ride along so the website's error reports (broken video/poster)
+// can be routed to the club that owns the item.
 function majorBillboardEntry(billboard: ScreenBillboardRow, screen: string) {
   return {
+    id: billboard.id,
+    club_id: billboard.club_id ?? null,
     screen,
     name: billboard.event_name || billboard.event_slots?.event_name || billboard.title || "Major event",
     club: clubName(billboard),
@@ -119,20 +125,12 @@ function buildScreensJson(events: ScreenEventRow[], billboards: ScreenBillboardR
     ? rotatedMajorEvents(majorBillboards, rotation, now)
     : majorBillboards
     .slice(0, 10)
-    .map((billboard, index) => ({
-      screen: `V${String(index + 1).padStart(2, "0")}`,
-      name: billboard.event_name || billboard.event_slots?.event_name || billboard.title || "Major event",
-      club: clubName(billboard),
-      date: "",
-      time: "",
-      video: billboard.media_url,
-      description: billboard.about_club || "Flagship event",
-      details: billboard.about_club || "Details will be updated soon.",
-      registerUrl: "/events"
-    }));
+    .map((billboard, index) => majorBillboardEntry(billboard, `V${String(index + 1).padStart(2, "0")}`));
   const billboardClubEvents = approvedBillboards
     .filter((billboard) => (billboard.event_tier ?? billboard.event_slots?.event_tier) !== "major" && billboard.type === "poster")
     .map((billboard) => ({
+      id: billboard.id,
+      club_id: billboard.club_id ?? null,
       club: clubName(billboard),
       event: billboard.event_name || billboard.event_slots?.event_name || billboard.title || "Club event",
       date: "",
@@ -150,6 +148,8 @@ function buildScreensJson(events: ScreenEventRow[], billboards: ScreenBillboardR
       .map((event, index) => {
         const parts = eventDateParts(event.start_datetime);
         return {
+          id: event.id,
+          club_id: event.club_id ?? null,
           screen: majorScreen(index, event),
           name: event.title,
           club: clubName(event),
@@ -169,6 +169,8 @@ function buildScreensJson(events: ScreenEventRow[], billboards: ScreenBillboardR
       .map((event) => {
         const parts = eventDateParts(event.start_datetime);
         return {
+          id: event.id,
+          club_id: event.club_id ?? null,
           club: clubName(event),
           event: event.title,
           date: parts.date,
@@ -220,7 +222,7 @@ export async function GET() {
       .order("start_datetime", { ascending: true }),
     supabase
       .from("billboards")
-      .select("id,event_slot_id,title,about_club,type,media_url,display_order,event_name,event_tier,clubs(name,short_name),event_slots(event_number,event_name,event_tier,required_media_type)")
+      .select("id,club_id,event_slot_id,title,about_club,type,media_url,display_order,event_name,event_tier,clubs(name,short_name),event_slots(event_number,event_name,event_tier,required_media_type)")
       .eq("status", "approved")
       .eq("active", true)
       .order("display_order", { ascending: true }),

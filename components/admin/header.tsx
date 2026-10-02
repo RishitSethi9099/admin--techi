@@ -1,8 +1,9 @@
+import Link from "next/link";
 import { Bell, Search, ShieldCheck } from "lucide-react";
 import { signOut } from "@/lib/actions/auth";
 import type { Profile } from "@/lib/supabase/types";
 
-export function Header({ profile }: { profile: Profile }) {
+export function Header({ profile, openErrors = null }: { profile: Profile; openErrors?: number | null }) {
   const initials = profile.name
     .split(" ")
     .map((part) => part[0])
@@ -21,9 +22,21 @@ export function Header({ profile }: { profile: Profile }) {
           <ShieldCheck className="h-4 w-4 text-primary" />
           {profile.role.replace("_", " ")}
         </div>
-        <button className="grid h-10 w-10 place-items-center rounded-lg border border-border text-muted" aria-label="Notifications">
-          <Bell className="h-4 w-4" />
-        </button>
+        {openErrors !== null ? (
+          <Link
+            href="/errors"
+            className="relative grid h-10 w-10 place-items-center rounded-lg border border-border text-muted hover:text-foreground"
+            aria-label={openErrors ? `${openErrors} open errors` : "Errors"}
+            title={openErrors ? `${openErrors} open error${openErrors === 1 ? "" : "s"}` : "No open errors"}
+          >
+            <Bell className="h-4 w-4" />
+            {openErrors ? (
+              <span className="absolute -right-1.5 -top-1.5 min-w-[1.25rem] rounded-full bg-red-500 px-1.5 text-center text-[11px] font-bold leading-5 text-white">
+                {openErrors > 99 ? "99+" : openErrors}
+              </span>
+            ) : null}
+          </Link>
+        ) : null}
         <div className="flex items-center gap-3">
           <div className="grid h-10 w-10 place-items-center rounded-full bg-primary-soft text-sm font-semibold text-primary">
             {initials}

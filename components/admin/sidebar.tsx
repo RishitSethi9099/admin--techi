@@ -27,7 +27,7 @@ const nav = [
   { href: "/backups", label: "Backups", icon: Archive }
 ];
 
-export function Sidebar({ role }: { role: AppRole }) {
+export function Sidebar({ role, openErrors = null }: { role: AppRole; openErrors?: number | null }) {
   const activePath = usePathname();
 
   return (
@@ -52,7 +52,12 @@ export function Sidebar({ role }: { role: AppRole }) {
                 )}
               >
                 <Icon className="h-4 w-4" />
-                {item.label}
+                <span className="flex-1">{item.label}</span>
+                {item.href === "/errors" && openErrors ? (
+                  <span className="min-w-[1.5rem] rounded-full bg-red-500 px-2 py-0.5 text-center text-xs font-bold text-white" aria-label={`${openErrors} open errors`}>
+                    {openErrors > 99 ? "99+" : openErrors}
+                  </span>
+                ) : null}
               </Link>
             );
           })}

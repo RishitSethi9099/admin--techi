@@ -1,7 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 
-const publicRoutes = ["/login", "/auth/callback", "/api/screens", "/api/schedule"];
+// Public: login pages, the website feeds, and error reports from the website / Sentry / uptime monitors.
+const publicRoutes = ["/login", "/auth/callback", "/api/screens", "/api/schedule", "/api/webhooks"];
 
 export async function middleware(request: NextRequest) {
   const requestHeaders = new Headers(request.headers);
@@ -62,7 +63,7 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!api/screens|api/schedule|_next/static|_next/image|favicon.ico).*)"]
+  matcher: ["/((?!api/screens|api/schedule|api/webhooks|_next/static|_next/image|favicon.ico).*)"]
 };
 
 
