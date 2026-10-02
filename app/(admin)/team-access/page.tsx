@@ -10,13 +10,14 @@ import { updateAdmin } from "@/lib/actions/admins";
 import { formatDateTime } from "@/lib/utils";
 import { TeamAccessCreateForm } from "@/components/admin/team-access-create-form";
 import { BulkClubAdmins } from "@/components/admin/bulk-club-admins";
+import { AdminSelectBox, DeleteAdminButton, DeleteSelectedBar } from "@/components/admin/admin-delete";
 
 export default async function TeamAccessPage({
   searchParams
 }: {
   searchParams?: { created?: string; updated?: string; email?: string; error?: string };
 }) {
-  await requireSuperAdmin();
+  const me = await requireSuperAdmin();
   const loadResult = await Promise.all([getAdmins(), getClubs()])
     .then(([admins, clubs]) => ({ admins, clubs, error: null as string | null }))
     .catch((error: Error) => ({ admins: [], clubs: [], error: error.message }));
@@ -91,12 +92,15 @@ export default async function TeamAccessPage({
       {!admins.length ? (
         <EmptyState title="No admin accounts" description="Create the first admin access record once Supabase is connected." />
       ) : (
+        <>
+        <DeleteSelectedBar />
         <div className="grid gap-4 xl:grid-cols-2">
           {admins.map((admin) => (
             <Card key={admin.id} className="p-5">
               <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
+                    <AdminSelectBox id={admin.id} name={admin.name} disabled={admin.id === me.id} />
                     <div className="font-semibold text-foreground">{admin.name}</div>
                     <Badge tone={admin.role === "super_admin" ? "purple" : admin.role === "event_ops" ? "blue" : "grey"}>
                       {admin.role.replace("_", " ")}
@@ -144,9 +148,13 @@ export default async function TeamAccessPage({
                   <input name="ban_reason" defaultValue={admin.ban_reason ?? ""} placeholder="Ban reason" className="h-9 w-full rounded-lg border border-border px-2 text-sm" />
                 </form>
               </div>
+              <div className="mt-4 border-t border-border pt-3">
+                <DeleteAdminButton id={admin.id} name={admin.name} isSelf={admin.id === me.id} />
+              </div>
             </Card>
           ))}
         </div>
+        </>
       )}
     </>
   );

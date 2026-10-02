@@ -355,3 +355,54 @@ export async function bulkCreateClubAdmins(input: { rows: BulkClubAdminRow[]; st
   return results;
 }
 
+
+/* ---------------- delete admin accounts ---------------- */
+
+export type DeleteAdminsResult = { ok: boolean; message: string; deleted: string[] };
+
+/**
+ * Permanently deletes admin accounts (login + profile). Old records stay; they
+ * just lose the link to the person (needs migration 013). Never deletes the
+ * signed-in Super Admin or the last active Super Admin.
+ */
+export async function deleteAdmins(input: { ids: string[] }): Promise<DeleteAdminsResult> {
+  const profile = await requireSuperAdmin();
+  const ids = Array.from(new Set(z.array(z.string().uuid()).max(200).parse(input.ids)));
+  if (!ids.length) return { ok: false, message: "Select at least one account.", deleted: [] };
+  if (ids.includes(profile.id)) return { ok: false, message: "You can't delete your own account. Ask another Super Admin.", deleted: [] };
+  if (!hasSupabaseEnv() || !process.env.SUPABASE_SERVICE_ROLE_KEY) return { ok: false, message: "Supabase is not connected.", deleted: [] };
+
+  const service = createServiceRoleClient();
+  const { data: targets, error: targetError } = await service.from("users").select("id,name,email,role,status").in("id", ids);
+  if (targetError) return { ok: false, message: targetError.message, deleted: [] };
+  const { count: activeSupers } = await service.from("users").select("id", { count: "exact", head: true }).eq("role", "super_admin").eq("status", "active");
+  const supersDeleted = (targets ?? []).filter((t) => t.role === "super_admin" && t.status === "active").length;
+  if (supersDeleted && (activeSupers ?? 0) - supersDeleted < 1) {
+    return { ok: false, message: "At least one active Super Admin must remain.", deleted: [] };
+  }
+
+  const deleted: string[] = [];
+  const failures: string[] = [];
+  for (const target of targets ?? []) {
+    const { error } = await service.auth.admin.deleteUser(target.id);
+    let failure = error && !/not\s*found/i.test(error.message) ? error.message : null;
+    if (!failure) {
+      // login already gone (or never existed): make sure the profile row is gone too
+      const { error: profileError } = await service.from("users").delete().eq("id", target.id);
+      if (profileError) failure = profileError.message;
+    }
+    if (failure) {
+      const hint = /append-only|approve or reject|database error/i.test(failure) ? " Run Supabase migration 013_allow_admin_account_deletion.sql, then try again." : "";
+      failures.push(`${target.name}: ${failure}.${hint}`);
+      continue;
+    }
+    deleted.push(target.id);
+    await writeAuditLogSafely({ action: "admin.delete", entityType: "user", entityId: target.id, diff: { name: target.name, email: target.email, role: target.role } });
+  }
+
+  revalidatePath("/team-access");
+  const done = `${deleted.length} account${deleted.length === 1 ? "" : "s"} deleted.`;
+  return failures.length
+    ? { ok: deleted.length > 0, message: `${deleted.length ? done + " " : ""}Not deleted: ${failures.join(" ")}`, deleted }
+    : { ok: true, message: done, deleted };
+}
