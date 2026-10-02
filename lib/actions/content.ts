@@ -20,6 +20,7 @@ const billboardSchema = z.object({
 
 const BILLBOARD_VIDEO_MAX_BYTES = 3 * 1024 * 1024;
 const BILLBOARD_POSTER_TYPES = ["image/png", "image/jpeg", "image/webp"];
+const EVENT_POSTER_MAX_BYTES = 10 * 1024 * 1024;
 
 type BillboardEventSlot = {
   id: string;
@@ -45,6 +46,30 @@ function validateBillboardFile(file: File | null, type: "video" | "poster") {
   if (!BILLBOARD_POSTER_TYPES.includes(file.type)) {
     throw new Error("Billboard poster must be PNG, JPG, or WebP.");
   }
+}
+
+function httpUrlOrEmpty(value: unknown) {
+  const raw = typeof value === "string" ? value.trim() : "";
+  if (!raw) return "";
+  try {
+    const url = new URL(raw);
+    return url.protocol === "http:" || url.protocol === "https:" ? url.href : "";
+  } catch {
+    return "";
+  }
+}
+
+function localDateTimeToUtc(value: string) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toISOString();
+}
+
+function validateEventPoster(file: File | null) {
+  if (!file || file.size === 0) return;
+  if (!BILLBOARD_POSTER_TYPES.includes(file.type)) throw new Error("Event poster must be PNG, JPG, or WebP.");
+  if (file.size > EVENT_POSTER_MAX_BYTES) throw new Error("Event poster must be under 10 MB.");
 }
 
 async function uploadMediaFile({
@@ -212,14 +237,33 @@ export async function saveTeamMember(formData: FormData) {
 }
 
 const eventSchema = z.object({
+  id: z.string().uuid().optional(),
   club_id: z.string().uuid(),
-  title: z.string().min(3),
-  description: z.string().min(3),
-  event_datetime: z.string().min(1),
-  venue: z.string().min(2),
-  registration_url: z.string().url().or(z.literal("")).nullable(),
-  poster_url: z.string().url().or(z.literal("")).nullable()
+  title: z.string().trim().min(3).max(120),
+  description: z.string().trim().min(3).max(1200),
+  start_datetime: z.string().min(1),
+  end_datetime: z.string().min(1),
+  venue: z.string().trim().min(2).max(160),
+  registration_url: z.preprocess(httpUrlOrEmpty, z.string().url().or(z.literal(""))),
+  poster_url: z.preprocess(httpUrlOrEmpty, z.string().url().or(z.literal(""))),
+  status: z.enum(["draft", "published"]).default("draft")
+}).superRefine((value, ctx) => {
+  const start = Date.parse(value.start_datetime);
+  const end = Date.parse(value.end_datetime);
+  if (Number.isNaN(start)) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["start_datetime"], message: "Start date/time is invalid." });
+  if (Number.isNaN(end)) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["end_datetime"], message: "End date/time is invalid." });
+  if (!Number.isNaN(start) && !Number.isNaN(end) && end <= start) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["end_datetime"], message: "End must be after start." });
+  }
 });
+
+async function assertEventClubScope(profile: Awaited<ReturnType<typeof requireProfile>>, clubId: string) {
+  if (profile.role === "club_admin" && clubId !== profile.club_id) throw new Error("Wrong club scope.");
+  if (profile.role === "event_ops") {
+    const assignedClubIds = await getAssignedClubIds(profile.id);
+    if (!assignedClubIds.includes(clubId)) throw new Error("Wrong event ops club scope.");
+  }
+}
 
 export async function saveEvent(formData: FormData) {
   const profile = await requireProfile();
@@ -227,51 +271,61 @@ export async function saveEvent(formData: FormData) {
     revalidatePath("/events");
     return;
   }
-  const parsed = eventSchema.parse(Object.fromEntries(formData));
-  if (profile.role === "club_admin" && parsed.club_id !== profile.club_id) throw new Error("Wrong club scope.");
-  if (profile.role === "event_ops") {
-    const assignedClubIds = await getAssignedClubIds(profile.id);
-    if (!assignedClubIds.includes(parsed.club_id)) throw new Error("Wrong event ops club scope.");
-  }
+  const parsed = eventSchema.parse({
+    id: formData.get("id") || undefined,
+    club_id: formData.get("club_id"),
+    title: formData.get("title"),
+    description: formData.get("description"),
+    start_datetime: localDateTimeToUtc(String(formData.get("start_datetime") ?? "")),
+    end_datetime: localDateTimeToUtc(String(formData.get("end_datetime") ?? "")),
+    venue: formData.get("venue"),
+    registration_url: formData.get("registration_url"),
+    poster_url: formData.get("poster_url"),
+    status: formData.get("status") === "published" ? "published" : "draft"
+  });
+  await assertEventClubScope(profile, parsed.club_id);
   const supabase = createSupabaseServerClient();
   const posterFile = formData.get("poster_file");
+  const poster = posterFile instanceof File ? posterFile : null;
+  validateEventPoster(poster);
   const uploadedPosterUrl = await uploadMediaFile({
     supabase,
     bucket: "event-posters",
     clubId: parsed.club_id,
-    file: posterFile instanceof File ? posterFile : null
+    file: poster
   });
   const payload = {
     ...parsed,
-    poster_url: uploadedPosterUrl ?? parsed.poster_url
+    id: undefined,
+    event_datetime: parsed.start_datetime,
+    poster_url: (uploadedPosterUrl ?? parsed.poster_url) || null,
+    registration_url: parsed.registration_url || null
   };
-  if (profile.role !== "super_admin") {
-    const { data, error } = await supabase
-      .from("approval_requests")
-      .insert({
-        requested_by: profile.id,
-        requester_name: profile.name,
-        requester_role: profile.role,
-        resource_type: "event",
-        resource_id: null,
-        action: "event_submission",
-        risk: profile.role === "event_ops" ? "high" : "medium",
-        status: "pending",
-        reason: "Event changes require Super Admin approval before publication.",
-        previous_value: {},
-        proposed_value: payload
-      })
-      .select("id")
-      .single();
-    if (error) throw new Error(error.message);
-    await writeAuditLog({ action: "approval_request.create", entityType: "approval_request", entityId: data.id, diff: payload });
-    revalidatePath("/events");
-    revalidatePath("/approvals");
-    return;
-  }
-  const { data, error } = await supabase.from("events").insert(payload).select("id").single();
+  const query = parsed.id
+    ? supabase.from("events").update(payload).eq("id", parsed.id).select("id").single()
+    : supabase.from("events").insert(payload).select("id").single();
+  const { data, error } = await query;
   if (error) throw new Error(error.message);
-  await writeAuditLog({ action: "create", entityType: "event", entityId: data.id, diff: payload });
+  await writeAuditLog({ action: parsed.id ? "update" : "create", entityType: "event", entityId: data.id, diff: payload });
   revalidatePath("/events");
 }
+
+const deleteEventSchema = z.object({ id: z.string().uuid(), club_id: z.string().uuid() });
+
+export async function deleteEvent(formData: FormData) {
+  const profile = await requireProfile();
+  if (!hasSupabaseEnv()) {
+    revalidatePath("/events");
+    return;
+  }
+  const parsed = deleteEventSchema.parse(Object.fromEntries(formData));
+  await assertEventClubScope(profile, parsed.club_id);
+  const supabase = createSupabaseServerClient();
+  const { error } = await supabase.from("events").delete().eq("id", parsed.id);
+  if (error) throw new Error(error.message);
+  await writeAuditLog({ action: "delete", entityType: "event", entityId: parsed.id, diff: parsed });
+  revalidatePath("/events");
+}
+
+
 

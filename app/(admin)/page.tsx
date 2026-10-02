@@ -46,7 +46,7 @@ export default async function DashboardPage() {
   }
 
   if (profile.role === "event_ops") {
-    const upcoming = events.filter((event) => new Date(event.event_datetime).getTime() >= Date.now());
+    const upcoming = events.filter((event) => new Date(event.start_datetime).getTime() >= Date.now());
     return (
       <>
         <ConnectionBanner />
@@ -60,9 +60,9 @@ export default async function DashboardPage() {
         <Section title="Events requiring attention" empty="No event operations records are available yet." items={upcoming.map((event) => ({
           id: event.id,
           title: event.title,
-          meta: `${event.venue ?? "Venue not set"} · ${formatDateTime(event.event_datetime)}`,
+          meta: `${event.venue ?? "Venue not set"} · ${formatDateTime(event.start_datetime)}`,
           status: event.lifecycle_status ?? event.status,
-          date: event.event_datetime
+          date: event.start_datetime
         }))} />
       </>
     );

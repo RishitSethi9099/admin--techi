@@ -112,7 +112,7 @@ export async function reviewApprovalRequest(formData: FormData) {
         .from("events")
         .insert({
           ...(request.proposed_value as Record<string, unknown>),
-          status: "approved",
+          status: "published",
           approved_by: profile.id,
           approved_at: new Date().toISOString()
         })

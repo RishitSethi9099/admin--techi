@@ -5,7 +5,7 @@ type ScreenEventRow = {
   id: string;
   title: string;
   description: string | null;
-  event_datetime?: string | null;
+  start_datetime?: string | null;
   poster_url?: string | null;
   poster_tall_url?: string | null;
   poster_wide_url?: string | null;
@@ -104,14 +104,14 @@ function buildScreensJson(events: ScreenEventRow[], billboards: ScreenBillboardR
       posterWide: billboard.media_url
     }));
 
-  const approvedEvents = events.filter((event) => event.event_datetime);
+  const approvedEvents = events.filter((event) => event.start_datetime);
   const majorEvents = billboardMajorEvents.length
     ? billboardMajorEvents
     : approvedEvents
       .filter((event) => event.event_tier === "major" || event.category?.toLowerCase() === "major")
       .slice(0, 10)
       .map((event, index) => {
-        const parts = eventDateParts(event.event_datetime);
+        const parts = eventDateParts(event.start_datetime);
         return {
           screen: majorScreen(index, event),
           name: event.title,
@@ -130,7 +130,7 @@ function buildScreensJson(events: ScreenEventRow[], billboards: ScreenBillboardR
     : approvedEvents
       .filter((event) => event.event_tier !== "major" && event.category?.toLowerCase() !== "major")
       .map((event) => {
-        const parts = eventDateParts(event.event_datetime);
+        const parts = eventDateParts(event.start_datetime);
         return {
           club: clubName(event),
           event: event.title,
@@ -175,9 +175,9 @@ export async function GET() {
     supabase
       .from("events")
       .select("*,clubs(name,short_name)")
-      .eq("status", "approved")
+      .eq("status", "published")
       .is("deleted_at", null)
-      .order("event_datetime", { ascending: true }),
+      .order("start_datetime", { ascending: true }),
     supabase
       .from("billboards")
       .select("id,title,about_club,type,media_url,display_order,event_name,event_tier,clubs(name,short_name),event_slots(event_number,event_name,event_tier,required_media_type)")

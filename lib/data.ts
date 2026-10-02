@@ -151,8 +151,8 @@ export async function getEvents() {
   const supabase = createSupabaseServerClient();
   const { data } = await supabase
     .from("events")
-    .select("*,clubs(id,name,slug,logo_url)")
-    .order("event_datetime");
+    .select("*,clubs(id,name,slug,short_name,logo_url)")
+    .order("start_datetime", { ascending: true });
   return (data ?? []) as Event[];
 }
 

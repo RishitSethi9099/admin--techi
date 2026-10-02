@@ -1,6 +1,7 @@
 export type AppRole = "super_admin" | "club_admin" | "event_ops";
 export type AdminStatus = "active" | "invited" | "suspended";
 export type ApprovalStatus = "draft" | "pending" | "approved" | "rejected" | "clarification_requested";
+export type EventStatus = "draft" | "published";
 export type EventLifecycleStatus = "draft" | "pending_approval" | "approved" | "ready" | "live" | "completed" | "archived";
 export type BillboardType = "video" | "poster";
 export type HealthStatus = "operational" | "degraded" | "warning" | "critical" | "not_monitored";
@@ -81,9 +82,10 @@ export type Event = {
   club_id: string;
   title: string;
   description: string;
-  event_datetime: string;
+  start_datetime: string;
+  end_datetime: string;
   poster_url: string | null;
-  status: ApprovalStatus;
+  status: EventStatus;
   lifecycle_status?: EventLifecycleStatus;
   category?: string | null;
   venue?: string | null;
