@@ -6,6 +6,7 @@ import { requireProfile, requireSuperAdmin } from "@/lib/auth";
 import { writeAuditLog } from "@/lib/actions/audit";
 import { createSupabaseServerClient, hasSupabaseEnv } from "@/lib/supabase/server";
 import { getAssignedClubIds } from "@/lib/data";
+import { istToIso } from "@/lib/event-time";
 
 const billboardSchema = z.object({
   club_id: z.string().uuid(),
@@ -57,13 +58,6 @@ function httpUrlOrEmpty(value: unknown) {
   } catch {
     return "";
   }
-}
-
-function localDateTimeToUtc(value: string) {
-  if (!value) return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  return date.toISOString();
 }
 
 function validateEventPoster(file: File | null) {
@@ -250,10 +244,10 @@ const eventSchema = z.object({
 }).superRefine((value, ctx) => {
   const start = Date.parse(value.start_datetime);
   const end = Date.parse(value.end_datetime);
-  if (Number.isNaN(start)) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["start_datetime"], message: "Start date/time is invalid." });
-  if (Number.isNaN(end)) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["end_datetime"], message: "End date/time is invalid." });
+  if (Number.isNaN(start)) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["start_datetime"], message: "Pick an event date and start time." });
+  if (Number.isNaN(end)) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["end_datetime"], message: "Pick an end date and end time." });
   if (!Number.isNaN(start) && !Number.isNaN(end) && end <= start) {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["end_datetime"], message: "End must be after start." });
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["end_datetime"], message: "End must be after start. Tick \"Runs overnight\" if the event ends on a later day." });
   }
 });
 
@@ -271,13 +265,19 @@ export async function saveEvent(formData: FormData) {
     revalidatePath("/events");
     return;
   }
+  const field = (name: string) => String(formData.get(name) ?? "");
+  const eventDate = field("event_date");
+  const overnight = formData.get("overnight") === "on";
+  const endDate = overnight ? field("end_date") : eventDate;
+  const start_datetime = istToIso(eventDate, field("start_hour"), field("start_minute"), field("start_meridiem"));
+  const end_datetime = istToIso(endDate, field("end_hour"), field("end_minute"), field("end_meridiem"));
   const parsed = eventSchema.parse({
     id: formData.get("id") || undefined,
     club_id: formData.get("club_id"),
     title: formData.get("title"),
     description: formData.get("description"),
-    start_datetime: localDateTimeToUtc(String(formData.get("start_datetime") ?? "")),
-    end_datetime: localDateTimeToUtc(String(formData.get("end_datetime") ?? "")),
+    start_datetime: start_datetime,
+    end_datetime: end_datetime,
     venue: formData.get("venue"),
     registration_url: formData.get("registration_url"),
     poster_url: formData.get("poster_url"),

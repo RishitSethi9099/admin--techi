@@ -149,10 +149,23 @@ export async function getEvents() {
   }
 
   const supabase = createSupabaseServerClient();
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from("events")
     .select("*,clubs(id,name,slug,short_name,logo_url)")
     .order("start_datetime", { ascending: true });
+  if (error) {
+    const { data: fallbackData, error: fallbackError } = await supabase
+      .from("events")
+      .select("*,clubs(id,name,slug,short_name,logo_url)")
+      .order("event_datetime", { ascending: true });
+    if (fallbackError) throw new Error(fallbackError.message);
+    return (fallbackData ?? []).map((event) => ({
+      ...event,
+      start_datetime: event.start_datetime ?? event.event_datetime,
+      end_datetime: event.end_datetime ?? event.event_datetime,
+      status: event.status === "approved" ? "published" : event.status === "pending" ? "draft" : event.status
+    })) as Event[];
+  }
   return (data ?? []) as Event[];
 }
 

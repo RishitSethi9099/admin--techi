@@ -5,16 +5,9 @@ import { Card } from "@/components/ui/card";
 import { requireProfile } from "@/lib/auth";
 import { deleteEvent, saveEvent } from "@/lib/actions/content";
 import { getAssignedClubIds, getClubs, getEvents } from "@/lib/data";
-import { formatDateTime } from "@/lib/utils";
+import { EventScheduleFields } from "@/components/admin/event-schedule-fields";
+import { formatEventRange } from "@/lib/event-time";
 import type { Club, Event } from "@/lib/supabase/types";
-
-function dateTimeInputValue(value?: string | null) {
-  if (!value) return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  const offset = date.getTimezoneOffset() * 60000;
-  return new Date(date.getTime() - offset).toISOString().slice(0, 16);
-}
 
 function EventFields({ event, visibleClubs, canChooseClub, assignedClub }: { event?: Event; visibleClubs: Club[]; canChooseClub: boolean; assignedClub: Club | null }) {
   return (
@@ -33,16 +26,7 @@ function EventFields({ event, visibleClubs, canChooseClub, assignedClub }: { eve
         <input name="venue" required maxLength={160} defaultValue={event?.venue ?? ""} placeholder="Venue" className="h-11 rounded-xl border border-border px-3" />
       </div>
       <textarea name="description" required maxLength={1200} defaultValue={event?.description ?? ""} placeholder="About the event" className="min-h-28 rounded-xl border border-border px-3 py-2" />
-      <div className="grid gap-3 lg:grid-cols-2">
-        <label className="grid gap-1 text-sm text-muted">
-          <span className="font-medium text-foreground">Start date/time</span>
-          <input name="start_datetime" required type="datetime-local" defaultValue={dateTimeInputValue(event?.start_datetime)} className="h-11 rounded-xl border border-border px-3" />
-        </label>
-        <label className="grid gap-1 text-sm text-muted">
-          <span className="font-medium text-foreground">End date/time</span>
-          <input name="end_datetime" required type="datetime-local" defaultValue={dateTimeInputValue(event?.end_datetime)} className="h-11 rounded-xl border border-border px-3" />
-        </label>
-      </div>
+      <EventScheduleFields start={event?.start_datetime} end={event?.end_datetime} />
       <div className="grid gap-3 lg:grid-cols-2">
         <input name="registration_url" type="url" defaultValue={event?.registration_url ?? ""} placeholder="https:// registration link" className="h-11 rounded-xl border border-border px-3" />
         <select name="status" defaultValue={event?.status ?? "draft"} className="h-11 rounded-xl border border-border px-3">
@@ -138,7 +122,7 @@ export default async function EventsPage() {
                     <div className="text-sm text-muted">{event.clubs?.name ?? "Unknown club"}</div>
                     <div className="mt-1 text-xs text-muted">Venue: {event.venue ?? "Not set"} · Registration: {event.registration_url ? "Added" : "Not set"}</div>
                   </div>
-                  <div className="text-sm text-muted">{formatDateTime(event.start_datetime)} - {formatDateTime(event.end_datetime)}</div>
+                  <div className="text-sm text-muted">{formatEventRange(event.start_datetime, event.end_datetime)}</div>
                   <Badge tone={event.status === "published" ? "green" : "amber"}>{event.status}</Badge>
                   <span className="inline-flex items-center gap-2 text-sm font-semibold text-primary"><Pencil className="h-4 w-4" /> Edit</span>
                 </summary>

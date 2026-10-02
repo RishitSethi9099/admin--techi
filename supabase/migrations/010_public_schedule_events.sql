@@ -39,6 +39,25 @@ alter table public.events
     or registration_url ~* '^https?://'
   );
 
+-- Everything that references events.status must be removed before its type changes:
+-- policies and partial indexes from 001/008 compare it to approval_status values.
+drop policy if exists "Public reads approved events" on public.events;
+drop policy if exists "Club admins create own pending events" on public.events;
+drop policy if exists "Club admins update own events" on public.events;
+drop policy if exists "Super admins delete events" on public.events;
+drop policy if exists "Public reads published events" on public.events;
+drop policy if exists "Admins read scoped events" on public.events;
+drop policy if exists "Admins create scoped events" on public.events;
+drop policy if exists "Admins update scoped events" on public.events;
+drop policy if exists "Admins delete scoped events" on public.events;
+drop index if exists events_public_sort_idx;
+drop index if exists events_screen_export_idx;
+
+-- Events no longer go through approval (draft/published is set by the club),
+-- and this trigger would force the old 'pending' value, which event_status does not have.
+-- The billboards trigger keeps using the same function.
+drop trigger if exists events_prevent_club_admin_approval_changes on public.events;
+
 alter table public.events
   alter column status drop default;
 
@@ -54,8 +73,6 @@ alter table public.events
 alter table public.events
   alter column status set default 'draft'::public.event_status;
 
-drop index if exists events_public_sort_idx;
-drop index if exists events_screen_export_idx;
 create index if not exists events_public_schedule_idx
   on public.events (start_datetime, end_datetime)
   where status = 'published';
@@ -63,15 +80,6 @@ create index if not exists events_public_schedule_idx
 create index if not exists events_club_schedule_idx
   on public.events (club_id, start_datetime);
 
-drop policy if exists "Public reads approved events" on public.events;
-drop policy if exists "Club admins create own pending events" on public.events;
-drop policy if exists "Club admins update own events" on public.events;
-drop policy if exists "Super admins delete events" on public.events;
-drop policy if exists "Public reads published events" on public.events;
-drop policy if exists "Admins read scoped events" on public.events;
-drop policy if exists "Admins create scoped events" on public.events;
-drop policy if exists "Admins update scoped events" on public.events;
-drop policy if exists "Admins delete scoped events" on public.events;
 
 create policy "Public reads published events"
 on public.events for select
