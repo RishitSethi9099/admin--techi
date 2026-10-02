@@ -1,4 +1,4 @@
-import { Ban, KeyRound, ShieldCheck } from "lucide-react";
+import { Ban, KeyRound, ShieldCheck, Users } from "lucide-react";
 import { PageTitle } from "@/components/admin/page-title";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
@@ -9,6 +9,7 @@ import { getAdmins, getClubs } from "@/lib/data";
 import { updateAdmin } from "@/lib/actions/admins";
 import { formatDateTime } from "@/lib/utils";
 import { TeamAccessCreateForm } from "@/components/admin/team-access-create-form";
+import { BulkClubAdmins } from "@/components/admin/bulk-club-admins";
 
 export default async function TeamAccessPage({
   searchParams
@@ -58,6 +59,18 @@ export default async function TeamAccessPage({
           </p>
         </Card>
       ) : null}
+
+      <Card className="mb-5 p-5">
+        <div className="mb-1 flex items-center gap-2 text-sm font-semibold text-foreground">
+          <Users className="h-4 w-4 text-primary" />
+          Bulk add club admins
+        </div>
+        <p className="mb-4 text-sm text-muted">Create many club admin accounts from one spreadsheet. Each gets a generated password you can send on WhatsApp.</p>
+        <BulkClubAdmins
+          clubs={clubs}
+          admins={admins.map((admin) => ({ email: admin.email ?? "", club_id: admin.club_id ?? null, role: admin.role, name: admin.name }))}
+        />
+      </Card>
 
       <Card className="mb-5 p-5">
         <div className="mb-4 flex items-center gap-2 text-sm font-semibold text-foreground">

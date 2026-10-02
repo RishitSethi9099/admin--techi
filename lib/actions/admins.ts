@@ -1,5 +1,6 @@
 "use server";
 
+import { randomInt } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
@@ -216,3 +217,141 @@ export async function updateAdmin(formData: FormData) {
   revalidatePath("/team-access");
   redirect("/team-access?updated=1");
 }
+
+
+/* ---------------- bulk club admins (spreadsheet upload) ---------------- */
+
+export type BulkClubAdminRow = { club_id?: string; club: string; name: string; email: string; whatsapp?: string };
+export type BulkClubAdminResult = {
+  row: number;
+  club: string;
+  name: string;
+  email: string;
+  whatsapp: string;
+  status: "created" | "skipped" | "failed";
+  message: string;
+  login_id?: string;
+  password?: string;
+};
+
+const bulkRowSchema = z.object({
+  club_id: z.string().optional(),
+  club: z.string().trim().max(200),
+  name: z.string().trim().min(2, "Name is missing.").max(120),
+  email: z.string().trim().toLowerCase().email("Email is not valid."),
+  whatsapp: z.string().trim().max(30).optional()
+});
+
+// No look-alike characters (0/O, 1/l/I), grouped so it can be read out or typed easily.
+function generatePassword() {
+  const alphabet = "ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789";
+  const chars = Array.from({ length: 12 }, () => alphabet[randomInt(alphabet.length)]);
+  return `${chars.slice(0, 4).join("")}-${chars.slice(4, 8).join("")}-${chars.slice(8).join("")}`;
+}
+
+function slugify(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "club";
+}
+
+/**
+ * Creates club admin accounts from uploaded spreadsheet rows (send at most 10 per call).
+ * Returns each generated password once; passwords are not stored anywhere readable.
+ */
+export async function bulkCreateClubAdmins(input: { rows: BulkClubAdminRow[]; startRow: number }): Promise<BulkClubAdminResult[]> {
+  await requireSuperAdmin();
+  const rows = input.rows.slice(0, 10);
+  const base = (row: BulkClubAdminRow, i: number) => ({
+    row: input.startRow + i,
+    club: row.club ?? "",
+    name: row.name ?? "",
+    email: (row.email ?? "").trim().toLowerCase(),
+    whatsapp: row.whatsapp ?? ""
+  });
+  if (!hasSupabaseEnv() || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    return rows.map((row, i) => ({ ...base(row, i), status: "failed", message: "Supabase is not connected." }));
+  }
+
+  const service = createServiceRoleClient();
+  const { data: clubs, error: clubsError } = await service.from("clubs").select("id,name,short_name,slug");
+  if (clubsError) return rows.map((row, i) => ({ ...base(row, i), status: "failed", message: clubsError.message }));
+  const findClub = (row: BulkClubAdminRow) => {
+    if (row.club_id) {
+      const byId = clubs.find((club) => club.id === row.club_id);
+      if (byId) return byId;
+    }
+    const key = row.club.trim().toLowerCase();
+    return clubs.find((club) => [club.name, club.short_name, club.slug].some((v) => (v ?? "").trim().toLowerCase() === key)) ?? null;
+  };
+
+  const results: BulkClubAdminResult[] = [];
+  for (const [i, raw] of rows.entries()) {
+    const info = base(raw, i);
+    const parsed = bulkRowSchema.safeParse(raw);
+    if (!parsed.success) {
+      results.push({ ...info, status: "failed", message: parsed.error.issues[0]?.message ?? "Row is not valid." });
+      continue;
+    }
+    const row = parsed.data;
+    const club = findClub(raw);
+    if (!club) {
+      results.push({ ...info, status: "failed", message: `Club not found: ${row.club}` });
+      continue;
+    }
+    info.club = club.short_name || club.name;
+
+    const { data: existing } = await service.from("users").select("id").eq("email", row.email).limit(1).maybeSingle();
+    if (existing) {
+      results.push({ ...info, status: "skipped", message: "This email already has an admin account." });
+      continue;
+    }
+
+    // unique login ID: <club>-admin, <club>-admin-2, ...
+    const stem = `${slugify(club.short_name || club.slug || club.name)}-admin`;
+    const { data: taken } = await service.from("users").select("login_id").ilike("login_id", `${stem}%`);
+    const used = new Set((taken ?? []).map((item) => (item.login_id ?? "").toLowerCase()));
+    let loginId = stem;
+    for (let n = 2; used.has(loginId); n++) loginId = `${stem}-${n}`;
+
+    const password = generatePassword();
+    const { data: created, error: createError } = await service.auth.admin.createUser({
+      email: row.email,
+      password,
+      email_confirm: true,
+      user_metadata: { name: row.name, login_id: loginId, password_managed_by_super_admin: true }
+    });
+    if (createError || !created.user) {
+      const message = createError && isAlreadyRegisteredError(createError.message)
+        ? "This email is already registered in Supabase Auth. Use the single-account form to link it."
+        : createError?.message ?? "Supabase created no user.";
+      results.push({ ...info, status: "failed", message });
+      continue;
+    }
+
+    const { error: profileError } = await service.from("users").upsert({
+      id: created.user.id,
+      name: row.name,
+      email: row.email,
+      login_id: loginId,
+      role: "club_admin",
+      club_id: club.id,
+      status: "active"
+    });
+    if (profileError) {
+      await deleteAuthUserSafely(service, created.user.id);
+      results.push({ ...info, status: "failed", message: databaseSetupMessage(profileError.message) });
+      continue;
+    }
+
+    await writeAuditLogSafely({
+      action: "admin.bulk_create_club_admin",
+      entityType: "user",
+      entityId: created.user.id,
+      diff: { name: row.name, email: row.email, login_id: loginId, club_id: club.id, password: "[redacted]" }
+    });
+    results.push({ ...info, status: "created", message: "Account created.", login_id: loginId, password });
+  }
+
+  revalidatePath("/team-access");
+  return results;
+}
+
