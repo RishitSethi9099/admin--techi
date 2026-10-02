@@ -125,11 +125,13 @@ export function EventForm({
       setResult({ ok: false, message: posterProblem });
       return;
     }
+    // read the fields before they are disabled below (disabled fields are not sent)
+    const formData = new FormData(e.currentTarget);
     setSaving(true);
     setResult(null);
     let next: EventActionResult;
     try {
-      next = await saveEvent(new FormData(e.currentTarget));
+      next = await saveEvent(formData);
     } catch {
       next = { ok: false, message: "Could not reach the server. Check your connection and try again." };
     }
