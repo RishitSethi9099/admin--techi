@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createServiceRoleClient, hasSupabaseEnv } from "@/lib/supabase/server";
+import { MAJOR_SCREEN_COUNT, currentOrder, loadRotation, nextRotationAt, screenLabel, type RotationSettings } from "@/lib/screen-rotation";
 
 type ScreenEventRow = {
   id: string;
@@ -21,6 +22,7 @@ type ScreenEventRow = {
 
 type ScreenBillboardRow = {
   id: string;
+  event_slot_id?: string | null;
   title?: string | null;
   about_club?: string | null;
   type: "video" | "poster";
@@ -36,6 +38,11 @@ type ScreenBillboardRow = {
     required_media_type?: "video" | "poster" | null;
   } | null;
 };
+
+// Always read live data (new events, approvals, the hourly screen rotation)
+// instead of a copy frozen at build time. Browsers/CDN still cache via Cache-Control.
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 function corsHeaders() {
   return {
@@ -77,10 +84,40 @@ function posterPath(event: ScreenEventRow, key: "poster_tall_url" | "poster_wide
   return event[key] || event.poster_url || "";
 }
 
-function buildScreensJson(events: ScreenEventRow[], billboards: ScreenBillboardRow[] = []) {
+type ScreenRotation = { settings: RotationSettings; majorSlotIds: string[] } | null;
+
+function majorBillboardEntry(billboard: ScreenBillboardRow, screen: string) {
+  return {
+    screen,
+    name: billboard.event_name || billboard.event_slots?.event_name || billboard.title || "Major event",
+    club: clubName(billboard),
+    date: "",
+    time: "",
+    video: billboard.media_url,
+    description: billboard.about_club || "Flagship event",
+    details: billboard.about_club || "Details will be updated soon.",
+    registerUrl: "/events"
+  };
+}
+
+// Super Admin screen order (and hourly roll): club major videos go on the screen
+// their event slot holds right now. Screens whose club has no approved video are
+// left out, so the website keeps its placeholder video there.
+function rotatedMajorEvents(majorBillboards: ScreenBillboardRow[], rotation: NonNullable<ScreenRotation>, now: number) {
+  const order = currentOrder(rotation.settings, rotation.majorSlotIds, now).slice(0, MAJOR_SCREEN_COUNT);
+  return order.flatMap((slotId, position) => {
+    const billboard = majorBillboards.find((item) => item.event_slot_id === slotId);
+    return billboard ? [majorBillboardEntry(billboard, screenLabel(position))] : [];
+  });
+}
+
+function buildScreensJson(events: ScreenEventRow[], billboards: ScreenBillboardRow[] = [], rotation: ScreenRotation = null) {
+  const now = Date.now();
   const approvedBillboards = billboards.filter((billboard) => billboard.media_url);
-  const billboardMajorEvents = approvedBillboards
-    .filter((billboard) => (billboard.event_tier ?? billboard.event_slots?.event_tier) === "major" || billboard.type === "video")
+  const majorBillboards = approvedBillboards.filter((billboard) => (billboard.event_tier ?? billboard.event_slots?.event_tier) === "major" || billboard.type === "video");
+  const billboardMajorEvents = rotation
+    ? rotatedMajorEvents(majorBillboards, rotation, now)
+    : majorBillboards
     .slice(0, 10)
     .map((billboard, index) => ({
       screen: `V${String(index + 1).padStart(2, "0")}`,
@@ -156,6 +193,9 @@ function buildScreensJson(events: ScreenEventRow[], billboards: ScreenBillboardR
       phone: 2
     },
     testNow: "",
+    screenRotation: rotation
+      ? { rolling: rotation.settings.rolling, intervalMinutes: rotation.settings.intervalMinutes, nextChangeAt: nextRotationAt(rotation.settings, now)?.toISOString() ?? null }
+      : null,
     majorEvents,
     clubEvents
   };
@@ -171,7 +211,7 @@ export async function GET() {
   }
 
   const supabase = createServiceRoleClient();
-  const [eventsResult, billboardsResult] = await Promise.all([
+  const [eventsResult, billboardsResult, rotationResult, majorSlotsResult] = await Promise.all([
     supabase
       .from("events")
       .select("*,clubs(name,short_name)")
@@ -180,16 +220,23 @@ export async function GET() {
       .order("start_datetime", { ascending: true }),
     supabase
       .from("billboards")
-      .select("id,title,about_club,type,media_url,display_order,event_name,event_tier,clubs(name,short_name),event_slots(event_number,event_name,event_tier,required_media_type)")
+      .select("id,event_slot_id,title,about_club,type,media_url,display_order,event_name,event_tier,clubs(name,short_name),event_slots(event_number,event_name,event_tier,required_media_type)")
       .eq("status", "approved")
       .eq("active", true)
-      .order("display_order", { ascending: true })
+      .order("display_order", { ascending: true }),
+    loadRotation(supabase as never),
+    supabase.from("event_slots").select("id").eq("active", true).eq("event_tier", "major")
   ]);
+  // Only use the Super Admin order once it has been saved; until then keep the old upload order.
+  const rotation: ScreenRotation =
+    rotationResult.configured && !majorSlotsResult.error
+      ? { settings: rotationResult.settings, majorSlotIds: (majorSlotsResult.data ?? []).map((slot) => slot.id as string) }
+      : null;
 
   const error = eventsResult.error || billboardsResult.error;
   if (error) {
     return NextResponse.json({ error: error.message, ...buildScreensJson([]) }, { status: 500, headers: corsHeaders() });
   }
 
-  return NextResponse.json(buildScreensJson((eventsResult.data ?? []) as ScreenEventRow[], (billboardsResult.data ?? []) as unknown as ScreenBillboardRow[]), { headers: corsHeaders() });
+  return NextResponse.json(buildScreensJson((eventsResult.data ?? []) as ScreenEventRow[], (billboardsResult.data ?? []) as unknown as ScreenBillboardRow[], rotation), { headers: corsHeaders() });
 }

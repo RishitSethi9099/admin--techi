@@ -1,4 +1,5 @@
 import { createSupabaseServerClient, hasSupabaseEnv } from "@/lib/supabase/server";
+import { DEFAULT_ROTATION, loadRotation } from "@/lib/screen-rotation";
 import type {
   ApprovalRequest,
   AuditLog,
@@ -131,6 +132,13 @@ export async function getEventSlots() {
     const club = Array.isArray(slot.clubs) ? slot.clubs[0] : slot.clubs;
     return { ...slot, clubs: club ?? null };
   }) as unknown as EventSlot[];
+}
+
+export async function getScreenRotation() {
+  if (!hasSupabaseEnv()) {
+    return { settings: DEFAULT_ROTATION, configured: false, missingTable: false, error: null as string | null };
+  }
+  return loadRotation(createSupabaseServerClient() as never);
 }
 
 export async function getTeamMembers() {

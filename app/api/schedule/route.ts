@@ -17,6 +17,11 @@ type ScheduleEventRow = {
   clubs?: { name?: string | null; short_name?: string | null } | null;
 };
 
+// Always read live data (new events, approvals, the hourly screen rotation)
+// instead of a copy frozen at build time. Browsers/CDN still cache via Cache-Control.
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 function corsHeaders() {
   return {
     "Access-Control-Allow-Origin": "*",

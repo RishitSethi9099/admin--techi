@@ -1,56 +1,11 @@
-import { CalendarDays, Pencil, Plus, Trash2 } from "lucide-react";
+import { CalendarDays, Pencil } from "lucide-react";
 import { PageTitle } from "@/components/admin/page-title";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { requireProfile } from "@/lib/auth";
-import { deleteEvent, saveEvent } from "@/lib/actions/content";
 import { getAssignedClubIds, getClubs, getEvents } from "@/lib/data";
-import { EventScheduleFields } from "@/components/admin/event-schedule-fields";
+import { DeleteEventButton, EventForm } from "@/components/admin/event-form";
 import { formatEventRange } from "@/lib/event-time";
-import type { Club, Event } from "@/lib/supabase/types";
-
-function EventFields({ event, visibleClubs, canChooseClub, assignedClub }: { event?: Event; visibleClubs: Club[]; canChooseClub: boolean; assignedClub: Club | null }) {
-  return (
-    <div className="grid gap-3">
-      {event?.id ? <input type="hidden" name="id" value={event.id} /> : null}
-      {canChooseClub ? (
-        <select name="club_id" required defaultValue={event?.club_id ?? ""} className="h-11 rounded-xl border border-border px-3">
-          <option value="">Select club</option>
-          {visibleClubs.map((club) => <option key={club.id} value={club.id}>{club.name}</option>)}
-        </select>
-      ) : (
-        <input type="hidden" name="club_id" value={event?.club_id ?? assignedClub?.id ?? ""} />
-      )}
-      <div className="grid gap-3 lg:grid-cols-2">
-        <input name="title" required maxLength={120} defaultValue={event?.title ?? ""} placeholder="Event title" className="h-11 rounded-xl border border-border px-3" />
-        <input name="venue" required maxLength={160} defaultValue={event?.venue ?? ""} placeholder="Venue" className="h-11 rounded-xl border border-border px-3" />
-      </div>
-      <textarea name="description" required maxLength={1200} defaultValue={event?.description ?? ""} placeholder="About the event" className="min-h-28 rounded-xl border border-border px-3 py-2" />
-      <EventScheduleFields start={event?.start_datetime} end={event?.end_datetime} />
-      <div className="grid gap-3 lg:grid-cols-2">
-        <input name="registration_url" type="url" defaultValue={event?.registration_url ?? ""} placeholder="https:// registration link" className="h-11 rounded-xl border border-border px-3" />
-        <select name="status" defaultValue={event?.status ?? "draft"} className="h-11 rounded-xl border border-border px-3">
-          <option value="draft">Draft</option>
-          <option value="published">Published</option>
-        </select>
-      </div>
-      <label className="rounded-xl border border-dashed border-border bg-white px-4 py-4 text-sm text-muted">
-        <span className="mb-2 block font-medium text-foreground">Upload event poster</span>
-        <input name="poster_file" type="file" accept="image/png,image/jpeg,image/webp" className="block w-full text-sm" />
-      </label>
-      {event?.poster_url ? (
-        <div className="flex items-center gap-3 rounded-xl border border-border p-3">
-          <img src={event.poster_url} alt={`${event.title} poster preview`} className="h-24 w-20 rounded-lg object-cover" />
-          <div className="min-w-0 text-sm text-muted">
-            <div className="font-medium text-foreground">Current poster</div>
-            <div className="truncate">{event.poster_url}</div>
-          </div>
-        </div>
-      ) : null}
-      <input name="poster_url" type="url" defaultValue={event?.poster_url ?? ""} placeholder="Optional poster URL fallback" className="h-11 rounded-xl border border-border px-3" />
-    </div>
-  );
-}
 
 export default async function EventsPage() {
   const profile = await requireProfile();
@@ -97,22 +52,21 @@ export default async function EventsPage() {
             No club is assigned to this admin yet. Ask the Super Admin to assign a club in Team Access.
           </div>
         ) : (
-          <form action={saveEvent} className="grid gap-4">
-            <EventFields visibleClubs={visibleClubs} canChooseClub={canChooseClub} assignedClub={assignedClub} />
-            <button className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-primary px-4 font-semibold text-white">
-              <Plus className="h-4 w-4" /> Create event
-            </button>
-          </form>
+          <EventForm visibleClubs={visibleClubs} canChooseClub={canChooseClub} assignedClub={assignedClub} />
         )}
       </Card>
 
+      <div className="mb-2 flex items-baseline justify-between px-1">
+        <h2 className="text-lg font-semibold">{profile.role === "club_admin" ? "Your club's events" : "Events"}</h2>
+        <span className="text-sm text-muted">{visibleEvents.length} total · {visibleEvents.filter((event) => event.status === "published").length} published</span>
+      </div>
       <Card className="overflow-hidden">
         {!visibleEvents.length ? (
           <div className="p-6 text-sm text-muted">No events have been created yet.</div>
         ) : (
           <div className="divide-y divide-border">
             {visibleEvents.map((event) => (
-              <details key={event.id} className="group px-5 py-4">
+              <details key={event.id} id={`event-${event.id}`} className="group scroll-mt-24 px-5 py-4 transition-colors target:bg-green-50 target:ring-2 target:ring-inset target:ring-green-300">
                 <summary className="grid cursor-pointer list-none gap-3 xl:grid-cols-[40px_1fr_260px_110px_150px] xl:items-center">
                   <div className="grid h-10 w-10 place-items-center rounded-xl bg-blue-50 text-blue-600">
                     <CalendarDays className="h-4 w-4" />
@@ -127,17 +81,8 @@ export default async function EventsPage() {
                   <span className="inline-flex items-center gap-2 text-sm font-semibold text-primary"><Pencil className="h-4 w-4" /> Edit</span>
                 </summary>
                 <div className="mt-5 grid gap-4 rounded-2xl bg-slate-50 p-4">
-                  <form action={saveEvent} className="grid gap-4">
-                    <EventFields event={event} visibleClubs={visibleClubs} canChooseClub={canChooseClub} assignedClub={assignedClub} />
-                    <button className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-primary px-4 font-semibold text-white">Save changes</button>
-                  </form>
-                  <form action={deleteEvent}>
-                    <input type="hidden" name="id" value={event.id} />
-                    <input type="hidden" name="club_id" value={event.club_id} />
-                    <button className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-red-600 px-4 text-sm font-semibold text-white">
-                      <Trash2 className="h-4 w-4" /> Delete event
-                    </button>
-                  </form>
+                  <EventForm event={event} visibleClubs={visibleClubs} canChooseClub={canChooseClub} assignedClub={assignedClub} />
+                  <DeleteEventButton id={event.id} clubId={event.club_id} title={event.title} />
                 </div>
               </details>
             ))}

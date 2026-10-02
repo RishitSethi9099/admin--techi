@@ -4,18 +4,31 @@ import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { requireProfile } from "@/lib/auth";
 import { approveContent } from "@/lib/actions/content";
-import { getApprovalRequests, getAssignedClubIds, getBillboards, getClubs, getEventSlots } from "@/lib/data";
+import { getApprovalRequests, getAssignedClubIds, getBillboards, getClubs, getEventSlots, getScreenRotation } from "@/lib/data";
 import { BillboardForm } from "@/components/admin/billboard-form";
+import { ScreenRotationPanel, type RotationSlot } from "@/components/admin/screen-rotation-panel";
 
 export default async function BillboardsPage() {
   const profile = await requireProfile();
-  const [billboards, clubs, eventSlots, approvals, assignedClubIds] = await Promise.all([
+  const [billboards, clubs, eventSlots, approvals, assignedClubIds, rotation] = await Promise.all([
     getBillboards(),
     getClubs(),
     getEventSlots(),
     getApprovalRequests(),
-    profile.role === "event_ops" ? getAssignedClubIds(profile.id) : Promise.resolve([])
+    profile.role === "event_ops" ? getAssignedClubIds(profile.id) : Promise.resolve([]),
+    profile.role === "super_admin" ? getScreenRotation() : Promise.resolve(null)
   ]);
+  const rotationSlots: RotationSlot[] = eventSlots
+    .filter((slot) => slot.event_tier === "major")
+    .map((slot) => {
+      const uploads = billboards.filter((billboard) => billboard.event_slot_id === slot.id && billboard.media_url);
+      const video: RotationSlot["video"] = uploads.some((billboard) => billboard.status === "approved" && billboard.active)
+        ? "approved"
+        : uploads.some((billboard) => billboard.status === "pending")
+          ? "pending"
+          : "none";
+      return { id: slot.id, clubName: slot.clubs?.short_name || slot.clubs?.name || "Club", eventName: slot.event_name, video };
+    });
   const visibleClubs =
     profile.role === "super_admin"
       ? clubs
@@ -69,6 +82,11 @@ export default async function BillboardsPage() {
             : "Submit your club promotion for the website billboard."
         }
       />
+      {rotation ? (
+        <Card className="mb-5 p-5">
+          <ScreenRotationPanel slots={rotationSlots} initialSettings={rotation.settings} missingTable={rotation.missingTable} />
+        </Card>
+      ) : null}
       <Card className="mb-5 p-5">
         {profile.role === "club_admin" && assignedClub ? (
           <div className="mb-4 rounded-2xl border border-primary/20 bg-primary-soft px-4 py-3">

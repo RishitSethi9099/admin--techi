@@ -21,7 +21,8 @@ const billboardSchema = z.object({
 
 const BILLBOARD_VIDEO_MAX_BYTES = 3 * 1024 * 1024;
 const BILLBOARD_POSTER_TYPES = ["image/png", "image/jpeg", "image/webp"];
-const EVENT_POSTER_MAX_BYTES = 10 * 1024 * 1024;
+// Server actions accept up to 4 MB (next.config.mjs); Vercel caps request bodies at 4.5 MB.
+const EVENT_POSTER_MAX_BYTES = 4 * 1024 * 1024;
 
 type BillboardEventSlot = {
   id: string;
@@ -63,7 +64,7 @@ function httpUrlOrEmpty(value: unknown) {
 function validateEventPoster(file: File | null) {
   if (!file || file.size === 0) return;
   if (!BILLBOARD_POSTER_TYPES.includes(file.type)) throw new Error("Event poster must be PNG, JPG, or WebP.");
-  if (file.size > EVENT_POSTER_MAX_BYTES) throw new Error("Event poster must be under 10 MB.");
+  if (file.size > EVENT_POSTER_MAX_BYTES) throw new Error("Event poster must be under 4 MB.");
 }
 
 async function uploadMediaFile({
@@ -259,11 +260,41 @@ async function assertEventClubScope(profile: Awaited<ReturnType<typeof requirePr
   }
 }
 
-export async function saveEvent(formData: FormData) {
+export type EventActionResult = { ok: boolean; message: string; id?: string };
+
+function friendlyEventError(error: unknown) {
+  if (error instanceof z.ZodError) {
+    const issue = error.issues[0];
+    const field = String(issue?.path?.[0] ?? "");
+    const labels: Record<string, string> = {
+      club_id: "Select a club.",
+      title: "Event title must be 3–120 characters.",
+      description: "About the event must be 3–1200 characters.",
+      venue: "Venue must be 2–160 characters.",
+      registration_url: "Registration link must start with http:// or https://.",
+      poster_url: "Poster URL must start with http:// or https://."
+    };
+    return labels[field] ?? issue?.message ?? "Some fields are not valid.";
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  if (/body exceeded|payload too large|413/i.test(message)) return "The poster file is too big. Keep it under 4 MB.";
+  if (/scope/i.test(message)) return "You can only manage events for your own club.";
+  return message || "Something went wrong. Please try again.";
+}
+
+export async function saveEvent(formData: FormData): Promise<EventActionResult> {
+  try {
+    return await saveEventOrThrow(formData);
+  } catch (error) {
+    return { ok: false, message: friendlyEventError(error) };
+  }
+}
+
+async function saveEventOrThrow(formData: FormData): Promise<EventActionResult> {
   const profile = await requireProfile();
   if (!hasSupabaseEnv()) {
     revalidatePath("/events");
-    return;
+    return { ok: true, message: "Saved (demo mode, no database connected)." };
   }
   const field = (name: string) => String(formData.get(name) ?? "");
   const eventDate = field("event_date");
@@ -308,15 +339,29 @@ export async function saveEvent(formData: FormData) {
   if (error) throw new Error(error.message);
   await writeAuditLog({ action: parsed.id ? "update" : "create", entityType: "event", entityId: data.id, diff: payload });
   revalidatePath("/events");
+  const visibility = parsed.status === "published" ? "It is published and will show on the website." : "It is saved as a draft and is not on the website yet.";
+  return {
+    ok: true,
+    id: data.id,
+    message: parsed.id ? `Changes to “${parsed.title}” saved. ${visibility}` : `“${parsed.title}” was created. ${visibility}`
+  };
 }
 
 const deleteEventSchema = z.object({ id: z.string().uuid(), club_id: z.string().uuid() });
 
-export async function deleteEvent(formData: FormData) {
+export async function deleteEvent(formData: FormData): Promise<EventActionResult> {
+  try {
+    return await deleteEventOrThrow(formData);
+  } catch (error) {
+    return { ok: false, message: friendlyEventError(error) };
+  }
+}
+
+async function deleteEventOrThrow(formData: FormData): Promise<EventActionResult> {
   const profile = await requireProfile();
   if (!hasSupabaseEnv()) {
     revalidatePath("/events");
-    return;
+    return { ok: true, message: "Event deleted." };
   }
   const parsed = deleteEventSchema.parse(Object.fromEntries(formData));
   await assertEventClubScope(profile, parsed.club_id);
@@ -325,6 +370,7 @@ export async function deleteEvent(formData: FormData) {
   if (error) throw new Error(error.message);
   await writeAuditLog({ action: "delete", entityType: "event", entityId: parsed.id, diff: parsed });
   revalidatePath("/events");
+  return { ok: true, message: "Event deleted." };
 }
 
 
