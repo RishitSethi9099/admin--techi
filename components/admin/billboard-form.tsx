@@ -1,11 +1,30 @@
 "use client";
 
 import { useMemo, useRef, useState, type FormEvent } from "react";
-import { CheckCircle2, Edit3, Plus } from "lucide-react";
+import { CheckCircle2, Edit3, Loader2, Plus } from "lucide-react";
 import { saveBillboard } from "@/lib/actions/content";
+import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import type { AppRole, ApprovalStatus, Club, EventSlot } from "@/lib/supabase/types";
 
-const VIDEO_MAX_BYTES = 3 * 1024 * 1024;
+const VIDEO_MAX_BYTES = 7 * 1024 * 1024;
+// Vercel rejects requests over 4.5 MB, so files are uploaded straight from the browser to
+// Supabase storage and only the link is sent to the server.
+
+function safeFileName(name: string) {
+  return name.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "upload";
+}
+
+async function uploadFromBrowser(clubId: string, file: File) {
+  const supabase = createSupabaseBrowserClient();
+  const path = `${clubId}/${Date.now()}-${safeFileName(file.name)}`;
+  const { error } = await supabase.storage.from("billboard-media").upload(path, file, {
+    cacheControl: "3600",
+    upsert: false,
+    contentType: file.type || undefined
+  });
+  if (error) throw new Error(`Upload failed: ${error.message}`);
+  return supabase.storage.from("billboard-media").getPublicUrl(path).data.publicUrl;
+}
 const RATIO_TOLERANCE = 0.08;
 
 function closeTo(value: number, target: number) {
@@ -46,7 +65,19 @@ export function BillboardForm({
     if (!fileOk || isSubmitting) return;
     setIsSubmitting(true);
     setState(null);
-    const result = await saveBillboard(null, new FormData(event.currentTarget));
+    const formData = new FormData(event.currentTarget);
+    const file = formData.get("media_file");
+    let result: { ok: boolean; message: string };
+    try {
+      if (file instanceof File && file.size > 0) {
+        const clubId = String(formData.get("club_id") || "");
+        formData.set("media_url", await uploadFromBrowser(clubId, file));
+        formData.delete("media_file");
+      }
+      result = await saveBillboard(null, formData);
+    } catch (error) {
+      result = { ok: false, message: error instanceof Error ? error.message : "Could not upload. Check your connection and try again." };
+    }
     setState(result);
     setIsSubmitting(false);
     if (result.ok) {
@@ -66,7 +97,7 @@ export function BillboardForm({
 
   const specs = useMemo(() => {
     if (type === "video") {
-      return "Upload MP4 video only: 16:9, about 10 seconds, under 3 MB if possible.";
+      return "Upload MP4 video only: 16:9, about 10 seconds, under 7 MB.";
     }
     return "Upload poster image only: tall 1:2 or wide 2:1, PNG/JPG/WebP.";
   }, [type]);
@@ -84,7 +115,7 @@ export function BillboardForm({
       }
       if (file.size > VIDEO_MAX_BYTES) {
         setFileOk(false);
-        setFileMessage("Video is over 3 MB. Compress it before uploading.");
+        setFileMessage(`Video is ${(file.size / 1024 / 1024).toFixed(1)} MB. Keep it under 7 MB (compress it, e.g. with HandBrake).`);
         return;
       }
       const url = URL.createObjectURL(file);
@@ -104,7 +135,7 @@ export function BillboardForm({
           setFileMessage("Video should be about 10 seconds. Keep it between 8 and 12 seconds.");
           return;
         }
-        setFileMessage("Video looks good: MP4, 16:9, around 10 seconds, under 3 MB.");
+        setFileMessage("Video looks good: MP4, 16:9, around 10 seconds, under 7 MB.");
       };
       video.onerror = () => {
         URL.revokeObjectURL(url);
@@ -213,8 +244,8 @@ export function BillboardForm({
           {state && !state.ok ? (
             <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{state.message}</p>
           ) : null}
-          <button disabled={!fileOk} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-primary px-4 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">
-            <Plus className="h-4 w-4" /> Submit {type === "video" ? "video" : "poster"}
+          <button disabled={!fileOk || isSubmitting} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-primary px-4 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">
+            {isSubmitting ? <><Loader2 className="h-4 w-4 animate-spin" /> Uploading…</> : <><Plus className="h-4 w-4" /> Submit {type === "video" ? "video" : "poster"}</>}
           </button>
         </form>
       )}

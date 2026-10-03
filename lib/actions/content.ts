@@ -19,7 +19,7 @@ const billboardSchema = z.object({
   active: z.coerce.boolean().default(false)
 });
 
-const BILLBOARD_VIDEO_MAX_BYTES = 3 * 1024 * 1024;
+const BILLBOARD_VIDEO_MAX_BYTES = 7 * 1024 * 1024;
 const BILLBOARD_POSTER_TYPES = ["image/png", "image/jpeg", "image/webp"];
 // Server actions accept up to 4 MB (next.config.mjs); Vercel caps request bodies at 4.5 MB.
 const EVENT_POSTER_MAX_BYTES = 4 * 1024 * 1024;
@@ -41,7 +41,7 @@ function validateBillboardFile(file: File | null, type: "video" | "poster") {
 
   if (type === "video") {
     if (file.type !== "video/mp4") throw new Error("Billboard video must be MP4.");
-    if (file.size > BILLBOARD_VIDEO_MAX_BYTES) throw new Error("Billboard video must be under 3 MB.");
+    if (file.size > BILLBOARD_VIDEO_MAX_BYTES) throw new Error("Billboard video must be under 7 MB.");
     return;
   }
 

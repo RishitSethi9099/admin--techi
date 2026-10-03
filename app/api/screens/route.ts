@@ -196,7 +196,7 @@ function buildScreensJson(events: ScreenEventRow[], billboards: ScreenBillboardR
     _generatedAt: new Date().toISOString(),
     _help: [
       "Generated from approved Supabase billboard uploads and events by techi-admin.",
-      "Major events fill V01-V10 and should use 10 second 16:9 MP4 videos under 3 MB if possible.",
+      "Major events fill V01-V10 and should use 10 second 16:9 MP4 videos under 7 MB.",
       "Minor club events rotate on poster screens and should use 1:2 tall plus 2:1 wide poster images."
     ],
     posterSwitchSeconds: 8,

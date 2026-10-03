@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { AlertTriangle, CheckCircle2, Copy, Download, FileUp, Loader2, MessageCircle, XCircle } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { AlertTriangle, CheckCircle2, Copy, Download, FileUp, Loader2, MessageCircle, RotateCcw, XCircle } from "lucide-react";
 import { bulkCreateClubAdmins, type BulkClubAdminResult, type BulkClubAdminRow } from "@/lib/actions/admins";
 import type { Club } from "@/lib/supabase/types";
 
@@ -10,6 +10,24 @@ type PreviewRow = BulkClubAdminRow & { line: number; problems: string[]; warning
 
 const HEADERS = ["club", "admin_name", "email", "whatsapp", "club_id"];
 const BATCH = 5;
+
+const TEMPLATE_KEY = "techi-club-admin-message";
+const PLACEHOLDERS = ["{name}", "{club}", "{link}", "{email}", "{password}"];
+const DEFAULT_MESSAGE = `Hi {name}, here is your TECHIDEATE '26 admin login for {club}.
+
+Link: {link}
+Email: {email}
+Password: {password}
+
+Please keep it private.
+
+Please follow the guidelines and upload by 5th October to get your spot on the main website:
+- Major event video: about 10 seconds, 16:9, MP4, under 7 MB. It plays on a loop.
+- Minor events and promotion: a club poster in two sizes, a tall one (1:2) and a wide one (2:1).`;
+
+function fillMessage(template: string, values: Record<string, string>) {
+  return template.replace(/\{(name|club|link|email|password)\}/gi, (_m, key: string) => values[key.toLowerCase()] ?? "");
+}
 
 /* minimal CSV reader: quotes, commas, CRLF, BOM (what Excel / Google Sheets export) */
 function parseCsv(text: string) {
@@ -57,6 +75,20 @@ export function BulkClubAdmins({ clubs, admins }: { clubs: Club[]; admins: Exist
   const [done, setDone] = useState(0);
   const [results, setResults] = useState<BulkClubAdminResult[] | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
+  const [template, setTemplate] = useState(DEFAULT_MESSAGE);
+
+  // remember the edited message on this browser
+  useEffect(() => {
+    try { const saved = localStorage.getItem(TEMPLATE_KEY); if (saved) setTemplate(saved); } catch { /* storage blocked */ }
+  }, []);
+  function changeTemplate(value: string) {
+    setTemplate(value);
+    try {
+      if (value === DEFAULT_MESSAGE) localStorage.removeItem(TEMPLATE_KEY);
+      else localStorage.setItem(TEMPLATE_KEY, value);
+    } catch { /* storage blocked */ }
+  }
+  const missing = PLACEHOLDERS.filter((p) => !template.toLowerCase().includes(p));
 
   const clubAdminsByClub = useMemo(() => {
     const map = new Map<string, string[]>();
@@ -149,7 +181,7 @@ export function BulkClubAdmins({ clubs, admins }: { clubs: Club[]; admins: Exist
 
   const loginUrl = typeof window !== "undefined" ? `${window.location.origin}/login` : "/login";
   const message = (r: BulkClubAdminResult) =>
-    `Hi ${r.name}, here is your TECHIDEATE '26 admin login for ${r.club}.\n\nLink: ${loginUrl}\nEmail: ${r.email}\nPassword: ${r.password}\n\nPlease keep it private.`;
+    fillMessage(template, { name: r.name, club: r.club, link: loginUrl, email: r.email, password: r.password ?? "" });
   const created = results?.filter((r) => r.status === "created") ?? [];
 
   async function copy(key: string, text: string) {
@@ -172,6 +204,25 @@ export function BulkClubAdmins({ clubs, admins }: { clubs: Club[]; admins: Exist
           <input type="file" accept=".csv,text/csv" className="sr-only" disabled={running} onChange={(e) => { onFile(e.target.files?.[0]); e.target.value = ""; }} />
         </label>
         {fileName ? <span className="self-center text-sm text-muted">{fileName}</span> : null}
+      </div>
+      <div className="grid gap-2 rounded-xl border border-border bg-white p-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <span className="font-medium text-foreground">Message sent with each login (WhatsApp and Copy)</span>
+          {template !== DEFAULT_MESSAGE ? (
+            <button type="button" onClick={() => changeTemplate(DEFAULT_MESSAGE)} className="inline-flex items-center gap-1 text-sm font-semibold text-primary underline underline-offset-2">
+              <RotateCcw className="h-3.5 w-3.5" /> Reset to default
+            </button>
+          ) : null}
+        </div>
+        <textarea value={template} onChange={(e) => changeTemplate(e.target.value)} rows={12} className="min-h-48 rounded-xl border border-border px-3 py-2 text-sm" />
+        <p className="text-xs text-muted">
+          These fill in for each person: {PLACEHOLDERS.map((p) => <code key={p} className="mx-0.5 rounded bg-slate-100 px-1">{p}</code>)}. You can edit the message after creating accounts too; the buttons always use the latest text. It's saved on this browser.
+        </p>
+        {missing.some((p) => p === "{email}" || p === "{password}" || p === "{link}") ? (
+          <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            The message doesn't include {missing.filter((p) => p !== "{name}" && p !== "{club}").join(", ")}, so they won't get {missing.length === 1 ? "it" : "them"}.
+          </p>
+        ) : null}
       </div>
       {fileProblem ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{fileProblem}</p> : null}
 
