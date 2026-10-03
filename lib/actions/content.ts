@@ -316,6 +316,29 @@ async function saveEventOrThrow(formData: FormData): Promise<EventActionResult> 
   });
   await assertEventClubScope(profile, parsed.club_id);
   const supabase = createSupabaseServerClient();
+
+  // Which of the club's events this schedule belongs to (decides major / minor).
+  const slotId = field("event_slot_id").trim() || null;
+  let tier: "major" | "minor" = "minor";
+  let slotName: string | null = null;
+  if (slotId) {
+    if (!z.string().uuid().safeParse(slotId).success) throw new Error("Pick which event this is.");
+    const { data: slot, error: slotError } = await supabase
+      .from("event_slots")
+      .select("id,club_id,event_name,event_tier,active")
+      .eq("id", slotId)
+      .maybeSingle();
+    if (slotError) throw new Error(slotError.message);
+    if (!slot || !slot.active) throw new Error("That event is no longer in the club's event list. Ask the Super Admin.");
+    if (slot.club_id !== parsed.club_id) throw new Error("That event belongs to a different club.");
+    tier = slot.event_tier === "major" ? "major" : "minor";
+    slotName = slot.event_name; // the listed event name always wins
+  } else if (!parsed.id && profile.role !== "super_admin") {
+    throw new Error("Pick which of your club's events this schedule is for.");
+  } else if (profile.role === "super_admin") {
+    tier = field("event_tier") === "major" ? "major" : "minor";
+  }
+
   const posterFile = formData.get("poster_file");
   const poster = posterFile instanceof File ? posterFile : null;
   validateEventPoster(poster);
@@ -325,18 +348,25 @@ async function saveEventOrThrow(formData: FormData): Promise<EventActionResult> 
     clubId: parsed.club_id,
     file: poster
   });
+  if (slotName) parsed.title = slotName;
   const payload = {
     ...parsed,
     id: undefined,
     event_datetime: parsed.start_datetime,
     poster_url: (uploadedPosterUrl ?? parsed.poster_url) || null,
-    registration_url: parsed.registration_url || null
+    registration_url: parsed.registration_url || null,
+    // only set when known, so editing an old unlinked event doesn't need migration 014
+    ...(slotId || profile.role === "super_admin" ? { event_slot_id: slotId, event_tier: tier } : {})
   };
   const query = parsed.id
     ? supabase.from("events").update(payload).eq("id", parsed.id).select("id").single()
     : supabase.from("events").insert(payload).select("id").single();
   const { data, error } = await query;
-  if (error) throw new Error(error.message);
+  if (error) {
+    if (error.code === "23505" || /events_one_per_slot/.test(error.message)) throw new Error("This event already has a schedule. Edit that one instead of adding a second.");
+    if (error.code === "42703" || /event_slot_id/.test(error.message)) throw new Error("Run Supabase migration 014_events_linked_to_slots.sql first.");
+    throw new Error(error.message);
+  }
   await writeAuditLog({ action: parsed.id ? "update" : "create", entityType: "event", entityId: data.id, diff: payload });
   revalidatePath("/events");
   const visibility = parsed.status === "published" ? "It is published and will show on the website." : "It is saved as a draft and is not on the website yet.";

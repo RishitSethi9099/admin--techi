@@ -7,6 +7,8 @@ import { deleteEvent, saveEvent, type EventActionResult } from "@/lib/actions/co
 import { EventScheduleFields } from "@/components/admin/event-schedule-fields";
 import type { Club, Event } from "@/lib/supabase/types";
 
+export type EventSlotInfo = { id: string; club_id: string; event_name: string; event_tier: "major" | "minor" };
+
 const POSTER_MAX_BYTES = 4 * 1024 * 1024;
 const POSTER_TYPES = ["image/png", "image/jpeg", "image/webp"];
 
@@ -15,18 +17,52 @@ function EventFields({
   visibleClubs,
   canChooseClub,
   assignedClub,
+  slot,
+  special,
+  linkOptions,
   onPosterProblem
 }: {
   event?: Event;
   visibleClubs: Club[];
   canChooseClub: boolean;
   assignedClub: Club | null;
+  slot?: EventSlotInfo;
+  special?: boolean;
+  linkOptions?: EventSlotInfo[];
   onPosterProblem: (message: string | null) => void;
 }) {
   return (
     <div className="grid gap-3">
       {event?.id ? <input type="hidden" name="id" value={event.id} /> : null}
-      {canChooseClub ? (
+      {slot ? (
+        <>
+          <input type="hidden" name="club_id" value={slot.club_id} />
+          <input type="hidden" name="event_slot_id" value={slot.id} />
+        </>
+      ) : linkOptions ? (
+        <label className="grid gap-1 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm">
+          <span className="font-medium text-amber-900">Which of the club's events is this?</span>
+          <select name="event_slot_id" defaultValue="" className="h-11 rounded-xl border border-border bg-white px-3">
+            <option value="">Not linked yet</option>
+            {linkOptions.map((option) => (
+              <option key={option.id} value={option.id}>{option.event_name} · {option.event_tier === "major" ? "Major" : "Minor"} event</option>
+            ))}
+          </select>
+          <span className="text-xs text-amber-800">Linking decides whether it shows as a major or minor event on the website.</span>
+        </label>
+      ) : null}
+      {special ? (
+        <div className="grid gap-3 lg:grid-cols-2">
+          <select name="club_id" required defaultValue={event?.club_id ?? ""} className="h-11 rounded-xl border border-border px-3">
+            <option value="">Shown under which club?</option>
+            {visibleClubs.map((club) => <option key={club.id} value={club.id}>{club.name}</option>)}
+          </select>
+          <select name="event_tier" defaultValue={event?.event_tier ?? "minor"} className="h-11 rounded-xl border border-border px-3">
+            <option value="minor">Minor event (timeline)</option>
+            <option value="major">Major event (Major Events section)</option>
+          </select>
+        </div>
+      ) : slot ? null : canChooseClub ? (
         <select name="club_id" required defaultValue={event?.club_id ?? ""} className="h-11 rounded-xl border border-border px-3">
           <option value="">Select club</option>
           {visibleClubs.map((club) => <option key={club.id} value={club.id}>{club.name}</option>)}
@@ -35,7 +71,14 @@ function EventFields({
         <input type="hidden" name="club_id" value={event?.club_id ?? assignedClub?.id ?? ""} />
       )}
       <div className="grid gap-3 lg:grid-cols-2">
-        <input name="title" required minLength={3} maxLength={120} defaultValue={event?.title ?? ""} placeholder="Event title" className="h-11 rounded-xl border border-border px-3" />
+        {slot ? (
+          <div className="grid h-11 content-center rounded-xl border border-border bg-slate-50 px-3 text-foreground" title="The event name comes from the club's event list">
+            <input type="hidden" name="title" value={slot.event_name} />
+            {slot.event_name}
+          </div>
+        ) : (
+          <input name="title" required minLength={3} maxLength={120} defaultValue={event?.title ?? ""} placeholder="Event title" className="h-11 rounded-xl border border-border px-3" />
+        )}
         <input name="venue" required minLength={2} maxLength={160} defaultValue={event?.venue ?? ""} placeholder="Venue" className="h-11 rounded-xl border border-border px-3" />
       </div>
       <textarea name="description" required minLength={3} maxLength={1200} defaultValue={event?.description ?? ""} placeholder="About the event" className="min-h-28 rounded-xl border border-border px-3 py-2" />
@@ -103,12 +146,21 @@ export function EventForm({
   event,
   visibleClubs,
   canChooseClub,
-  assignedClub
+  assignedClub,
+  slot,
+  special,
+  linkOptions
 }: {
   event?: Event;
   visibleClubs: Club[];
   canChooseClub: boolean;
   assignedClub: Club | null;
+  /** the club event this schedule belongs to (fixes club, name and major/minor) */
+  slot?: EventSlotInfo;
+  /** Super Admin special event (not one of a club's listed events) */
+  special?: boolean;
+  /** old events that aren't linked to a club event yet */
+  linkOptions?: EventSlotInfo[];
 }) {
   const router = useRouter();
   const isEdit = Boolean(event?.id);
@@ -150,7 +202,7 @@ export function EventForm({
   return (
     <form onSubmit={handleSubmit} className="grid gap-4" aria-busy={saving}>
       <fieldset disabled={saving} className="contents">
-        <EventFields key={formKey} event={event} visibleClubs={visibleClubs} canChooseClub={canChooseClub} assignedClub={assignedClub} onPosterProblem={setPosterProblem} />
+        <EventFields key={formKey} event={event} visibleClubs={visibleClubs} canChooseClub={canChooseClub} assignedClub={assignedClub} slot={slot} special={special} linkOptions={linkOptions} onPosterProblem={setPosterProblem} />
       </fieldset>
       {posterProblem ? <p className="text-sm font-medium text-red-600">{posterProblem}</p> : null}
       <div ref={bannerRef} className="grid gap-3">
@@ -166,7 +218,7 @@ export function EventForm({
           ) : isEdit ? (
             "Save changes"
           ) : (
-            <><Plus className="h-4 w-4" /> Create event</>
+            <><Plus className="h-4 w-4" /> {slot ? "Add schedule" : "Create event"}</>
           )}
         </button>
       </div>

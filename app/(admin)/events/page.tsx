@@ -1,94 +1,226 @@
-import { CalendarDays, Pencil } from "lucide-react";
+import Link from "next/link";
+import { CalendarDays, Pencil, Star } from "lucide-react";
 import { PageTitle } from "@/components/admin/page-title";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { requireProfile } from "@/lib/auth";
-import { getAssignedClubIds, getClubs, getEvents } from "@/lib/data";
-import { DeleteEventButton, EventForm } from "@/components/admin/event-form";
+import { getAssignedClubIds, getClubs, getEventSlots, getEvents } from "@/lib/data";
+import { DeleteEventButton, EventForm, type EventSlotInfo } from "@/components/admin/event-form";
 import { formatEventRange } from "@/lib/event-time";
+import type { Club, Event, EventSlot } from "@/lib/supabase/types";
 
-export default async function EventsPage() {
-  const profile = await requireProfile();
-  const [events, clubs, assignedClubIds] = await Promise.all([getEvents(), getClubs(), profile.role === "event_ops" ? getAssignedClubIds(profile.id) : Promise.resolve([])]);
-  const visibleClubs =
-    profile.role === "super_admin"
-      ? clubs
-      : profile.role === "event_ops"
-        ? clubs.filter((club) => assignedClubIds.includes(club.id))
-        : clubs.filter((club) => club.id === profile.club_id);
-  const assignedClub = visibleClubs[0] ?? null;
-  const visibleEvents =
-    profile.role === "super_admin"
-      ? events
-      : profile.role === "event_ops"
-        ? events.filter((event) => assignedClubIds.includes(event.club_id))
-        : events.filter((event) => event.club_id === profile.club_id);
-  const canChooseClub = profile.role === "super_admin" || profile.role === "event_ops";
+const TIER_TEXT = {
+  major: { label: "Major event", where: "Shows in the Major Events section of the website, with your billboard video." },
+  minor: { label: "Minor event", where: "Shows on the Minor Events timeline and the schedule page." }
+};
 
+function slotInfo(slot: EventSlot): EventSlotInfo {
+  return { id: slot.id, club_id: slot.club_id, event_name: slot.event_name, event_tier: slot.event_tier === "major" ? "major" : "minor" };
+}
+
+function ScheduleStatus({ event }: { event?: Event }) {
+  if (!event) return <Badge tone="grey">No schedule yet</Badge>;
+  return <Badge tone={event.status === "published" ? "green" : "amber"}>{event.status === "published" ? "On the website" : "Draft"}</Badge>;
+}
+
+function SlotSection({ slot, event, clubs }: { slot: EventSlot; event?: Event; clubs: Club[] }) {
+  const tier = slot.event_tier === "major" ? "major" : "minor";
   return (
-    <>
-      <PageTitle title="Events" subtitle="Create, edit, publish, and remove the public TECHIDEATE schedule timeline." />
-      <Card className="mb-5 p-5">
-        {profile.role === "club_admin" && assignedClub ? (
-          <div className="mb-4 rounded-2xl border border-primary/20 bg-primary-soft px-4 py-3">
-            <div className="text-xs font-semibold uppercase tracking-wide text-primary">Your club</div>
-            <div className="text-lg font-semibold text-foreground">{assignedClub.name}</div>
+    <Card className={`overflow-hidden ${tier === "major" ? "border-primary/40" : ""}`}>
+      <div className={`flex flex-wrap items-start justify-between gap-3 px-5 py-4 ${tier === "major" ? "bg-primary-soft" : "bg-slate-50"}`}>
+        <div className="min-w-0">
+          <div className={`inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 text-xs font-bold uppercase tracking-wide ${tier === "major" ? "bg-primary text-white" : "bg-slate-200 text-slate-700"}`}>
+            {tier === "major" ? <Star className="h-3 w-3" /> : null}
+            {TIER_TEXT[tier].label}
           </div>
-        ) : null}
-        {profile.role === "event_ops" && visibleClubs.length ? (
-          <div className="mb-4 rounded-2xl border border-primary/20 bg-primary-soft px-4 py-3">
-            <div className="text-xs font-semibold uppercase tracking-wide text-primary">Assigned clubs</div>
-            <div className="mt-2 flex flex-wrap gap-2">
-              {visibleClubs.map((club) => (
-                <span key={club.id} className="rounded-full bg-white px-3 py-1 text-sm font-medium text-foreground">
-                  {club.short_name ?? club.name}
-                </span>
-              ))}
-            </div>
-          </div>
-        ) : null}
-        {!assignedClub && profile.role !== "super_admin" ? (
-          <div className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-700">
-            No club is assigned to this admin yet. Ask the Super Admin to assign a club in Team Access.
-          </div>
-        ) : (
-          <EventForm visibleClubs={visibleClubs} canChooseClub={canChooseClub} assignedClub={assignedClub} />
-        )}
-      </Card>
-
-      <div className="mb-2 flex items-baseline justify-between px-1">
-        <h2 className="text-lg font-semibold">{profile.role === "club_admin" ? "Your club's events" : "Events"}</h2>
-        <span className="text-sm text-muted">{visibleEvents.length} total · {visibleEvents.filter((event) => event.status === "published").length} published</span>
+          <div className="mt-2 text-lg font-semibold">{slot.event_name}</div>
+          <div className="text-sm text-muted">{TIER_TEXT[tier].where}</div>
+        </div>
+        <div className="grid justify-items-end gap-1 text-right">
+          <ScheduleStatus event={event} />
+          {event ? <span className="text-sm text-muted">{formatEventRange(event.start_datetime, event.end_datetime)}</span> : null}
+        </div>
       </div>
-      <Card className="overflow-hidden">
-        {!visibleEvents.length ? (
-          <div className="p-6 text-sm text-muted">No events have been created yet.</div>
-        ) : (
+      <div className="grid gap-4 p-5">
+        <EventForm key={slot.id} event={event} slot={slotInfo(slot)} visibleClubs={clubs} canChooseClub={false} assignedClub={null} />
+        {event ? <DeleteEventButton id={event.id} clubId={event.club_id} title={event.title} /> : null}
+      </div>
+    </Card>
+  );
+}
+
+function ClubEvents({ club, slots, events, clubs, showName }: { club: Club; slots: EventSlot[]; events: Event[]; clubs: Club[]; showName: boolean }) {
+  const linked = (slot: EventSlot) => events.find((event) => event.event_slot_id === slot.id && !event.deleted_at);
+  const unlinked = events.filter((event) => event.club_id === club.id && !event.event_slot_id && !event.deleted_at);
+  const free = slots.filter((slot) => !linked(slot)).map(slotInfo);
+  const majors = slots.filter((slot) => slot.event_tier === "major").length;
+  return (
+    <section className="mb-8 grid gap-4">
+      <div className="flex flex-wrap items-baseline justify-between gap-2 px-1">
+        <h2 className="text-lg font-semibold">{showName ? club.name : "Your events"}</h2>
+        <span className="text-sm text-muted">
+          {slots.length ? `${majors} major · ${slots.length - majors} minor · ${slots.filter((slot) => linked(slot)).length} of ${slots.length} scheduled` : ""}
+        </span>
+      </div>
+      {!slots.length ? (
+        <div className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-700">
+          No events are listed for {club.short_name ?? club.name} yet. Ask the Super Admin to add them.
+        </div>
+      ) : (
+        slots.map((slot) => <SlotSection key={slot.id} slot={slot} event={linked(slot)} clubs={clubs} />)
+      )}
+      {unlinked.length ? (
+        <Card className="overflow-hidden border-amber-200">
+          <div className="bg-amber-50 px-5 py-3 text-sm text-amber-900">
+            <b>Older entries not linked to an event.</b> Open one and choose which event it is, so the website knows if it's major or minor.
+          </div>
           <div className="divide-y divide-border">
-            {visibleEvents.map((event) => (
-              <details key={event.id} id={`event-${event.id}`} className="group scroll-mt-24 px-5 py-4 transition-colors target:bg-green-50 target:ring-2 target:ring-inset target:ring-green-300">
-                <summary className="grid cursor-pointer list-none gap-3 xl:grid-cols-[40px_1fr_260px_110px_150px] xl:items-center">
-                  <div className="grid h-10 w-10 place-items-center rounded-xl bg-blue-50 text-blue-600">
-                    <CalendarDays className="h-4 w-4" />
-                  </div>
-                  <div>
-                    <div className="font-medium">{event.title}</div>
-                    <div className="text-sm text-muted">{event.clubs?.name ?? "Unknown club"}</div>
-                    <div className="mt-1 text-xs text-muted">Venue: {event.venue ?? "Not set"} · Registration: {event.registration_url ? "Added" : "Not set"}</div>
-                  </div>
-                  <div className="text-sm text-muted">{formatEventRange(event.start_datetime, event.end_datetime)}</div>
-                  <Badge tone={event.status === "published" ? "green" : "amber"}>{event.status}</Badge>
-                  <span className="inline-flex items-center gap-2 text-sm font-semibold text-primary"><Pencil className="h-4 w-4" /> Edit</span>
+            {unlinked.map((event) => (
+              <details key={event.id} className="px-5 py-4">
+                <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-3">
+                  <span className="font-medium">{event.title}</span>
+                  <span className="inline-flex items-center gap-2 text-sm font-semibold text-primary"><Pencil className="h-4 w-4" /> Open</span>
                 </summary>
-                <div className="mt-5 grid gap-4 rounded-2xl bg-slate-50 p-4">
-                  <EventForm event={event} visibleClubs={visibleClubs} canChooseClub={canChooseClub} assignedClub={assignedClub} />
+                <div className="mt-4 grid gap-4 rounded-2xl bg-slate-50 p-4">
+                  <EventForm event={event} visibleClubs={[club]} canChooseClub={false} assignedClub={club} linkOptions={free} />
                   <DeleteEventButton id={event.id} clubId={event.club_id} title={event.title} />
                 </div>
               </details>
             ))}
           </div>
-        )}
-      </Card>
+        </Card>
+      ) : null}
+    </section>
+  );
+}
+
+export default async function EventsPage({ searchParams }: { searchParams?: { club?: string } }) {
+  const profile = await requireProfile();
+  const isSuper = profile.role === "super_admin";
+  const [events, clubs, slots, assignedClubIds] = await Promise.all([
+    getEvents(),
+    getClubs(),
+    getEventSlots(),
+    profile.role === "event_ops" ? getAssignedClubIds(profile.id) : Promise.resolve([] as string[])
+  ]);
+  const order = (list: EventSlot[]) => [...list].sort((a, b) => (a.event_tier === b.event_tier ? a.event_number - b.event_number : a.event_tier === "major" ? -1 : 1));
+  const slotsFor = (clubId: string) => order(slots.filter((slot) => slot.club_id === clubId));
+  const linkedTo = (slot: EventSlot) => events.find((event) => event.event_slot_id === slot.id && !event.deleted_at);
+
+  const pickedClub = isSuper && searchParams?.club ? clubs.find((club) => club.id === searchParams.club) ?? null : null;
+  const scopeClubs = isSuper
+    ? pickedClub ? [pickedClub] : []
+    : profile.role === "event_ops"
+      ? clubs.filter((club) => assignedClubIds.includes(club.id))
+      : clubs.filter((club) => club.id === profile.club_id);
+  const special = events.filter((event) => !event.event_slot_id && !event.deleted_at);
+  const clubsWithSlots = clubs
+    .filter((club) => slots.some((slot) => slot.club_id === club.id))
+    .sort((a, b) => (a.short_name ?? a.name).localeCompare(b.short_name ?? b.name));
+
+  return (
+    <>
+      <PageTitle
+        title="Events"
+        subtitle={isSuper ? "Pick a club to add or edit the schedule for each of its events. Major events show in the website's Major Events section, minor events on the timeline." : "Add the date, time and venue for each of your events. Each one is already marked major or minor."}
+      />
+
+      {!isSuper && !scopeClubs.length ? (
+        <div className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-700">
+          No club is assigned to this admin yet. Ask the Super Admin to assign a club in Team Access.
+        </div>
+      ) : null}
+
+      {isSuper ? (
+        <Card className="mb-6 p-5">
+          <form action="/events" className="flex flex-wrap items-end gap-3">
+            <label className="grid min-w-[260px] flex-1 gap-1 text-sm">
+              <span className="font-medium">Club</span>
+              <select name="club" defaultValue={pickedClub?.id ?? ""} className="h-11 rounded-xl border border-border bg-white px-3">
+                <option value="">All clubs (overview)</option>
+                {clubsWithSlots.map((club) => <option key={club.id} value={club.id}>{club.short_name ?? club.name}</option>)}
+              </select>
+            </label>
+            <button className="h-11 rounded-xl bg-primary px-5 font-semibold text-white">Show</button>
+            {pickedClub ? <Link href="/events" className="self-center text-sm font-semibold text-primary underline underline-offset-2">Back to all clubs</Link> : null}
+          </form>
+
+          {!pickedClub ? (
+            <div className="mt-5 overflow-hidden rounded-xl border border-border">
+              <div className="grid grid-cols-[1fr_2.4fr_70px] gap-3 bg-slate-50 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-muted">
+                <span>Club</span><span>Events and their schedule</span><span />
+              </div>
+              <div className="divide-y divide-border">
+                {clubsWithSlots.map((club) => (
+                  <div key={club.id} className="grid grid-cols-[1fr_2.4fr_70px] items-center gap-3 px-4 py-3">
+                    <div className="font-medium">{club.short_name ?? club.name}</div>
+                    <div className="flex flex-wrap gap-2">
+                      {slotsFor(club.id).map((slot) => {
+                        const event = linkedTo(slot);
+                        return (
+                          <span key={slot.id} className="inline-flex items-center gap-2 rounded-lg border border-border bg-white px-2.5 py-1 text-sm">
+                            <span className={`rounded px-1.5 py-0.5 text-[11px] font-bold uppercase ${slot.event_tier === "major" ? "bg-primary text-white" : "bg-slate-200 text-slate-700"}`}>{slot.event_tier}</span>
+                            {slot.event_name}
+                            <ScheduleStatus event={event} />
+                          </span>
+                        );
+                      })}
+                    </div>
+                    <Link href={`/events?club=${club.id}`} className="text-right text-sm font-semibold text-primary">Open</Link>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </Card>
+      ) : null}
+
+      {scopeClubs.map((club) => (
+        <ClubEvents key={club.id} club={club} slots={slotsFor(club.id)} events={events.filter((event) => event.club_id === club.id)} clubs={clubs} showName={isSuper || scopeClubs.length > 1} />
+      ))}
+
+      {isSuper && !pickedClub ? (
+        <section className="grid gap-4">
+          <div className="px-1">
+            <h2 className="text-lg font-semibold">Special events</h2>
+            <p className="text-sm text-muted">Events that aren't one of a club's listed events, like the inauguration or a guest talk. You choose if each is major or minor.</p>
+          </div>
+          <Card className="p-5">
+            <EventForm special visibleClubs={clubs} canChooseClub assignedClub={null} />
+          </Card>
+          {special.length ? (
+            <Card className="overflow-hidden">
+              <div className="divide-y divide-border">
+                {special.map((event) => (
+                  <details key={event.id} id={`event-${event.id}`} className="px-5 py-4">
+                    <summary className="grid cursor-pointer list-none gap-3 xl:grid-cols-[40px_1fr_260px_120px_90px] xl:items-center">
+                      <div className="grid h-10 w-10 place-items-center rounded-xl bg-blue-50 text-blue-600"><CalendarDays className="h-4 w-4" /></div>
+                      <div>
+                        <div className="font-medium">{event.title}</div>
+                        <div className="text-sm text-muted">{event.clubs?.name ?? "Unknown club"} · {event.event_tier === "major" ? "Major" : "Minor"} event</div>
+                      </div>
+                      <div className="text-sm text-muted">{formatEventRange(event.start_datetime, event.end_datetime)}</div>
+                      <ScheduleStatus event={event} />
+                      <span className="inline-flex items-center gap-2 text-sm font-semibold text-primary"><Pencil className="h-4 w-4" /> Edit</span>
+                    </summary>
+                    <div className="mt-4 grid gap-4 rounded-2xl bg-slate-50 p-4">
+                      <EventForm
+                        event={event}
+                        special
+                        visibleClubs={clubs}
+                        canChooseClub
+                        assignedClub={null}
+                        linkOptions={slotsFor(event.club_id).filter((slot) => !linkedTo(slot)).map(slotInfo)}
+                      />
+                      <DeleteEventButton id={event.id} clubId={event.club_id} title={event.title} />
+                    </div>
+                  </details>
+                ))}
+              </div>
+            </Card>
+          ) : null}
+        </section>
+      ) : null}
     </>
   );
 }

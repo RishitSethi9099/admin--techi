@@ -90,6 +90,8 @@ export type Event = {
   category?: string | null;
   venue?: string | null;
   registration_url?: string | null;
+  event_slot_id?: string | null;
+  event_tier?: "major" | "minor" | null;
   rejection_reason: string | null;
   created_by: string | null;
   approved_by: string | null;

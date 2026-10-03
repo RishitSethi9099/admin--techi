@@ -8,6 +8,8 @@ type ScreenEventRow = {
   title: string;
   description: string | null;
   start_datetime?: string | null;
+  end_datetime?: string | null;
+  event_slot_id?: string | null;
   poster_url?: string | null;
   poster_tall_url?: string | null;
   poster_wide_url?: string | null;
@@ -78,54 +80,61 @@ function clubName(event: ScreenEventRow | ScreenBillboardRow) {
   return event.clubs?.short_name || event.clubs?.name || "Club TBA";
 }
 
-function majorScreen(index: number, event: ScreenEventRow) {
-  return event.screen_slot && /^V\d{2}$/i.test(event.screen_slot) ? event.screen_slot.toUpperCase() : `V${String(index + 1).padStart(2, "0")}`;
-}
-
 function posterPath(event: ScreenEventRow, key: "poster_tall_url" | "poster_wide_url") {
   return event[key] || event.poster_url || "";
 }
 
 type ScreenRotation = { settings: RotationSettings; majorSlotIds: string[] } | null;
 
-// id + club_id ride along so the website's error reports (broken video/poster)
-// can be routed to the club that owns the item.
-function majorBillboardEntry(billboard: ScreenBillboardRow, screen: string) {
-  return {
-    id: billboard.id,
-    club_id: billboard.club_id ?? null,
-    screen,
-    name: billboard.event_name || billboard.event_slots?.event_name || billboard.title || "Major event",
-    club: clubName(billboard),
-    date: "",
-    time: "",
-    video: billboard.media_url,
-    description: billboard.about_club || "Flagship event",
-    details: billboard.about_club || "Details will be updated soon.",
-    registerUrl: "/events"
-  };
+type MajorItem = { billboard?: ScreenBillboardRow; event?: ScreenEventRow };
+
+const IST_DAY = new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", weekday: "short", day: "numeric", month: "short" });
+const IST_TIME = new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", hour: "numeric", minute: "2-digit", hour12: true });
+
+function when(event: ScreenEventRow) {
+  if (!event.start_datetime) return null;
+  const start = new Date(event.start_datetime);
+  const end = event.end_datetime ? new Date(event.end_datetime) : null;
+  const day = IST_DAY.format(start).replace(",", "");
+  const sameDay = end && IST_DAY.format(end) === IST_DAY.format(start);
+  const time = end
+    ? `${IST_TIME.format(start)} – ${IST_TIME.format(end)}${sameDay ? "" : ` (${IST_DAY.format(end).replace(",", "")})`}`
+    : IST_TIME.format(start);
+  return { day, time: time.replace(/\s?(am|pm)/gi, (m) => ` ${m.trim().toUpperCase()}`) };
 }
 
-// Super Admin screen order (and hourly roll): club major videos go on the screen
-// their event slot holds right now. Screens whose club has no approved video are
-// left out, so the website keeps its placeholder video there.
-function rotatedMajorEvents(majorBillboards: ScreenBillboardRow[], rotation: NonNullable<ScreenRotation>, now: number) {
-  const order = currentOrder(rotation.settings, rotation.majorSlotIds, now).slice(0, MAJOR_SCREEN_COUNT);
-  return order.flatMap((slotId, position) => {
-    const billboard = majorBillboards.find((item) => item.event_slot_id === slotId);
-    return billboard ? [majorBillboardEntry(billboard, screenLabel(position))] : [];
-  });
+// One major-event screen: video from the club's approved billboard, schedule from
+// the Events entry linked to the same club event. Either can be missing.
+// id + club_id ride along so the website's error reports reach the right club.
+function majorEntry(screen: string, { billboard, event }: MajorItem) {
+  const parts = eventDateParts(event?.start_datetime);
+  const w = event ? when(event) : null;
+  const venue = event?.venue?.trim() || "";
+  const rawAbout = event?.description?.trim() || billboard?.about_club?.trim() || "";
+  const about = rawAbout && !/[.!?]$/.test(rawAbout) ? `${rawAbout}.` : rawAbout;
+  const schedule = w ? `${w.day}, ${w.time}${venue ? ` at ${venue}` : ""}` : "";
+  return {
+    id: billboard?.id ?? event?.id,
+    club_id: billboard?.club_id ?? event?.club_id ?? null,
+    screen,
+    name: event?.title || billboard?.event_name || billboard?.event_slots?.event_name || billboard?.title || "Major event",
+    club: clubName((event ?? billboard)!),
+    date: parts.date,
+    time: parts.time,
+    venue,
+    tags: w ? `[ ${[w.day, w.time, venue].filter(Boolean).join(" / ").toUpperCase()} ]` : "[ DATE & VENUE COMING SOON ]",
+    description: (billboard?.about_club || about || "Flagship event").slice(0, 90),
+    details: schedule ? `${about ? `${about} ` : ""}When: ${schedule}.` : `${about ? `${about} ` : ""}Date and venue coming soon.`,
+    registerUrl: event?.registration_url || "/events",
+    // no video key without an approved upload, so the website keeps its placeholder video
+    ...(billboard ? { video: billboard.media_url } : {})
+  };
 }
 
 function buildScreensJson(events: ScreenEventRow[], billboards: ScreenBillboardRow[] = [], rotation: ScreenRotation = null) {
   const now = Date.now();
   const approvedBillboards = billboards.filter((billboard) => billboard.media_url);
   const majorBillboards = approvedBillboards.filter((billboard) => (billboard.event_tier ?? billboard.event_slots?.event_tier) === "major" || billboard.type === "video");
-  const billboardMajorEvents = rotation
-    ? rotatedMajorEvents(majorBillboards, rotation, now)
-    : majorBillboards
-    .slice(0, 10)
-    .map((billboard, index) => majorBillboardEntry(billboard, `V${String(index + 1).padStart(2, "0")}`));
   const billboardClubEvents = approvedBillboards
     .filter((billboard) => (billboard.event_tier ?? billboard.event_slots?.event_tier) !== "major" && billboard.type === "poster")
     .map((billboard) => ({
@@ -140,27 +149,27 @@ function buildScreensJson(events: ScreenEventRow[], billboards: ScreenBillboardR
     }));
 
   const approvedEvents = events.filter((event) => event.start_datetime);
-  const majorEvents = billboardMajorEvents.length
-    ? billboardMajorEvents
-    : approvedEvents
-      .filter((event) => event.event_tier === "major" || event.category?.toLowerCase() === "major")
-      .slice(0, 10)
-      .map((event, index) => {
-        const parts = eventDateParts(event.start_datetime);
-        return {
-          id: event.id,
-          club_id: event.club_id ?? null,
-          screen: majorScreen(index, event),
-          name: event.title,
-          club: clubName(event),
-          date: parts.date,
-          time: parts.time,
-          video: event.video_url || "",
-          description: event.description || "Flagship event",
-          details: event.screen_details || event.description || "Details will be updated soon.",
-          registerUrl: event.registration_url || "/events"
-        };
+
+  // Major events: Super Admin screen order (and hourly roll) when saved; otherwise
+  // approved videos in upload order, then scheduled major events without a video yet.
+  const scheduledMajors = approvedEvents.filter((event) => event.event_tier === "major" || event.category?.toLowerCase() === "major");
+  const eventBySlot = new Map(scheduledMajors.filter((event) => event.event_slot_id).map((event) => [event.event_slot_id!, event]));
+  const billboardBySlot = new Map(majorBillboards.filter((billboard) => billboard.event_slot_id).map((billboard) => [billboard.event_slot_id!, billboard]));
+  let majorEvents: ReturnType<typeof majorEntry>[];
+  if (rotation) {
+    majorEvents = currentOrder(rotation.settings, rotation.majorSlotIds, now)
+      .slice(0, MAJOR_SCREEN_COUNT)
+      .flatMap((slotId, position) => {
+        const item = { billboard: billboardBySlot.get(slotId), event: eventBySlot.get(slotId) };
+        return item.billboard || item.event ? [majorEntry(screenLabel(position), item)] : [];
       });
+  } else {
+    const items: MajorItem[] = [
+      ...majorBillboards.map((billboard) => ({ billboard, event: billboard.event_slot_id ? eventBySlot.get(billboard.event_slot_id) : undefined })),
+      ...scheduledMajors.filter((event) => !event.event_slot_id || !billboardBySlot.has(event.event_slot_id)).map((event) => ({ event }))
+    ];
+    majorEvents = items.slice(0, MAJOR_SCREEN_COUNT).map((item, index) => majorEntry(screenLabel(index), item));
+  }
 
   const clubEvents = billboardClubEvents.length
     ? billboardClubEvents
