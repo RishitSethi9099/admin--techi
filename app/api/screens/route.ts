@@ -126,6 +126,8 @@ function majorEntry(screen: string, { billboard, event }: MajorItem) {
     description: (billboard?.about_club || about || "Flagship event").slice(0, 90),
     details: schedule ? `${about ? `${about} ` : ""}When: ${schedule}.` : `${about ? `${about} ` : ""}Date and venue coming soon.`,
     registerUrl: event?.registration_url || "/events",
+    // poster from the Events entry: the website's Major Events slider shows it with the date and venue
+    poster: event?.poster_wide_url || event?.poster_url || event?.poster_tall_url || null,
     // no video key without an approved upload, so the website keeps its placeholder video
     ...(billboard ? { video: billboard.media_url } : {})
   };
