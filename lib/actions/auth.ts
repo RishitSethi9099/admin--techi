@@ -23,6 +23,16 @@ export async function signIn(formData: FormData) {
   });
 
   if (error) return { error: error.message };
+
+  // Only accounts with an admin profile may use the panel; otherwise /login and / would bounce.
+  const { data: auth } = await supabase.auth.getUser();
+  const { data: profile } = auth.user
+    ? await supabase.from("users").select("id").eq("id", auth.user.id).maybeSingle()
+    : { data: null };
+  if (!profile) {
+    await supabase.auth.signOut();
+    return { error: "This account has no admin access. Ask the Super Admin to create one for you." };
+  }
   return { success: true, next: parsed.data.next };
 }
 

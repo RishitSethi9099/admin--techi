@@ -43,7 +43,12 @@ export const getCurrentProfile = cache(async () => {
 
 export async function requireProfile() {
   const profile = await getCurrentProfile();
-  if (!profile) redirect("/login");
+  if (!profile) {
+    // Signed in, but this login has no admin profile (e.g. the account was deleted).
+    // The status parameter stops the middleware from bouncing /login back to /.
+    const user = hasSupabaseEnv() ? await getSessionUser() : null;
+    redirect(user ? "/login?status=no-access" : "/login");
+  }
   if (profile.id_banned || profile.ip_banned) redirect("/login?status=blocked");
   if (profile.status !== "active") redirect("/login?status=suspended");
   return profile;

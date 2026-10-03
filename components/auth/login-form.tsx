@@ -16,7 +16,9 @@ export function LoginForm() {
       ? "This admin ID or IP is banned. Ask a Super Admin to remove the ban from Team Access."
       : accountStatus === "suspended"
         ? "This admin account is suspended. Ask a Super Admin to set it back to Active."
-        : null;
+        : accountStatus === "no-access"
+          ? "The account you were signed in with has no admin access (it may have been deleted). Sign in with your admin account."
+          : null;
 
   return (
     <form
