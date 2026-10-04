@@ -82,7 +82,7 @@ export function BillboardForm({
     if (type === "video") {
       return "Upload MP4 video only: 16:9, about 10 seconds, under 7 MB.";
     }
-    return "Upload poster image only: tall 1:2 or wide 2:1, PNG/JPG/WebP.";
+    return "Upload a poster image (PNG/JPG/WebP, any size). Best as tall 1:2 or wide 2:1.";
   }, [type]);
 
   async function validateFile(file: File | undefined) {
@@ -140,8 +140,8 @@ export function BillboardForm({
       URL.revokeObjectURL(url);
       const ratio = image.width / image.height;
       if (!closeTo(ratio, 1 / 2) && !closeTo(ratio, 2 / 1)) {
-        setFileOk(false);
-        setFileMessage("Poster must be tall 1:2 or wide 2:1.");
+        // allowed, just a heads-up: the website's screens are tall 1:2 or wide 2:1, so other shapes get cropped
+        setFileMessage("Poster accepted. Tip: tall 1:2 or wide 2:1 fits the website's screens best; other shapes get their edges cropped.");
         return;
       }
       setFileMessage(closeTo(ratio, 1 / 2) ? "Poster looks good: tall 1:2." : "Poster looks good: wide 2:1.");
