@@ -5,11 +5,11 @@ import { useRouter } from "next/navigation";
 import { CheckCircle2, Loader2, Plus, Trash2, X, XCircle } from "lucide-react";
 import { deleteEvent, saveEvent, type EventActionResult } from "@/lib/actions/content";
 import { EventScheduleFields } from "@/components/admin/event-schedule-fields";
+import { uploadFromBrowser } from "@/lib/browser-upload";
 import type { Club, Event } from "@/lib/supabase/types";
 
 export type EventSlotInfo = { id: string; club_id: string; event_name: string; event_tier: "major" | "minor" };
 
-const POSTER_MAX_BYTES = 4 * 1024 * 1024;
 const POSTER_TYPES = ["image/png", "image/jpeg", "image/webp"];
 
 function EventFields({
@@ -101,11 +101,10 @@ function EventFields({
             const file = e.target.files?.[0];
             if (!file) return onPosterProblem(null);
             if (!POSTER_TYPES.includes(file.type)) return onPosterProblem("Poster must be PNG, JPG, or WebP.");
-            if (file.size > POSTER_MAX_BYTES) return onPosterProblem(`Poster is ${(file.size / 1024 / 1024).toFixed(1)} MB. Keep it under 4 MB.`);
             onPosterProblem(null);
           }}
         />
-        <span className="mt-2 block text-xs">PNG, JPG or WebP, under 4 MB.</span>
+        <span className="mt-2 block text-xs">PNG, JPG or WebP. Any size.</span>
       </label>
       {event?.poster_url ? (
         <div className="flex items-center gap-3 rounded-xl border border-border p-3">
@@ -183,9 +182,15 @@ export function EventForm({
     setResult(null);
     let next: EventActionResult;
     try {
+      // upload the poster straight to storage, then send only its link
+      const poster = formData.get("poster_file");
+      if (poster instanceof File && poster.size > 0) {
+        formData.set("poster_url", await uploadFromBrowser("event-posters", String(formData.get("club_id") || ""), poster));
+      }
+      formData.delete("poster_file");
       next = await saveEvent(formData);
-    } catch {
-      next = { ok: false, message: "Could not reach the server. Check your connection and try again." };
+    } catch (error) {
+      next = { ok: false, message: error instanceof Error && error.message ? error.message : "Could not reach the server. Check your connection and try again." };
     }
     setSaving(false);
     setResult(next);

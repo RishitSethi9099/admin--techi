@@ -3,28 +3,11 @@
 import { useMemo, useRef, useState, type FormEvent } from "react";
 import { CheckCircle2, Edit3, Loader2, Plus } from "lucide-react";
 import { saveBillboard } from "@/lib/actions/content";
-import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
+import { uploadFromBrowser } from "@/lib/browser-upload";
 import type { AppRole, ApprovalStatus, Club, EventSlot } from "@/lib/supabase/types";
 
 const VIDEO_MAX_BYTES = 7 * 1024 * 1024;
-// Vercel rejects requests over 4.5 MB, so files are uploaded straight from the browser to
-// Supabase storage and only the link is sent to the server.
-
-function safeFileName(name: string) {
-  return name.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "upload";
-}
-
-async function uploadFromBrowser(clubId: string, file: File) {
-  const supabase = createSupabaseBrowserClient();
-  const path = `${clubId}/${Date.now()}-${safeFileName(file.name)}`;
-  const { error } = await supabase.storage.from("billboard-media").upload(path, file, {
-    cacheControl: "3600",
-    upsert: false,
-    contentType: file.type || undefined
-  });
-  if (error) throw new Error(`Upload failed: ${error.message}`);
-  return supabase.storage.from("billboard-media").getPublicUrl(path).data.publicUrl;
-}
+// Videos are capped at 7 MB to keep storage small and the 3D city smooth. Posters have no size cap.
 const RATIO_TOLERANCE = 0.08;
 
 function closeTo(value: number, target: number) {
@@ -71,7 +54,7 @@ export function BillboardForm({
     try {
       if (file instanceof File && file.size > 0) {
         const clubId = String(formData.get("club_id") || "");
-        formData.set("media_url", await uploadFromBrowser(clubId, file));
+        formData.set("media_url", await uploadFromBrowser("billboard-media", clubId, file));
         formData.delete("media_file");
       }
       result = await saveBillboard(null, formData);

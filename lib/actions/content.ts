@@ -21,8 +21,6 @@ const billboardSchema = z.object({
 
 const BILLBOARD_VIDEO_MAX_BYTES = 7 * 1024 * 1024;
 const BILLBOARD_POSTER_TYPES = ["image/png", "image/jpeg", "image/webp"];
-// Server actions accept up to 4 MB (next.config.mjs); Vercel caps request bodies at 4.5 MB.
-const EVENT_POSTER_MAX_BYTES = 4 * 1024 * 1024;
 
 type BillboardEventSlot = {
   id: string;
@@ -64,7 +62,6 @@ function httpUrlOrEmpty(value: unknown) {
 function validateEventPoster(file: File | null) {
   if (!file || file.size === 0) return;
   if (!BILLBOARD_POSTER_TYPES.includes(file.type)) throw new Error("Event poster must be PNG, JPG, or WebP.");
-  if (file.size > EVENT_POSTER_MAX_BYTES) throw new Error("Event poster must be under 4 MB.");
 }
 
 async function uploadMediaFile({
@@ -277,7 +274,7 @@ function friendlyEventError(error: unknown) {
     return labels[field] ?? issue?.message ?? "Some fields are not valid.";
   }
   const message = error instanceof Error ? error.message : String(error);
-  if (/body exceeded|payload too large|413/i.test(message)) return "The poster file is too big. Keep it under 4 MB.";
+  if (/body exceeded|payload too large|413/i.test(message)) return "The file was too big to send. Refresh the page and try again.";
   if (/scope/i.test(message)) return "You can only manage events for your own club.";
   return message || "Something went wrong. Please try again.";
 }
