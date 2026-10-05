@@ -1,0 +1,23 @@
+# Put this file in the BACKUP repo (backup-repo-) at .github/workflows/backup.yml
+# It asks the admin panel to back up every 30 minutes. The admin panel does the actual saving.
+name: Backup every 30 minutes
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"   # GitHub may start it a few minutes late when busy
+  workflow_dispatch: {}       # "Run workflow" button for a test run
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Ask the admin panel to back up
+        env:
+          BACKUP_CRON_SECRET: ${{ secrets.BACKUP_CRON_SECRET }}
+        run: |
+          code=$(curl -sS -o result.json -w "%{http_code}" -X POST \
+            -H "Authorization: Bearer $BACKUP_CRON_SECRET" \
+            https://admin-techi.vercel.app/api/backup)
+          cat result.json; echo
+          test "$code" = "200"

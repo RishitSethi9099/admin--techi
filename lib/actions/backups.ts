@@ -3,31 +3,22 @@
 import { revalidatePath } from "next/cache";
 import { requirePermission, requireSuperAdmin } from "@/lib/auth";
 import { writeAuditLog } from "@/lib/actions/audit";
-import { createSupabaseServerClient, hasSupabaseEnv } from "@/lib/supabase/server";
+import { hasSupabaseEnv } from "@/lib/supabase/server";
+import { runBackup, type BackupOutcome } from "@/lib/backup";
 
-export async function recordBackupNotConfigured() {
+/** "Back up now" on the Backups page (Super Admin only). */
+export async function runManualBackup(): Promise<BackupOutcome> {
   const profile = await requireSuperAdmin();
   await requirePermission("backups:trigger");
-
-  if (!hasSupabaseEnv()) {
-    revalidatePath("/backups");
-    return;
-  }
-
-  const supabase = createSupabaseServerClient();
-  const { data, error } = await supabase
-    .from("backup_runs")
-    .insert({
-      backup_type: "manual",
-      status: "not_configured",
-      completed_at: new Date().toISOString(),
-      failure_reason: "Backup executor is not connected yet. Configure the GitHub backup repo and private storage bucket before enabling runs.",
-      manifest: { github_repo: "RishitSethi9099/backup-repo-", media_storage: "not_configured" },
-      triggered_by: profile.id
-    })
-    .select("id")
-    .single();
-  if (error) throw new Error(error.message);
-  await writeAuditLog({ action: "backup.not_configured", entityType: "backup_run", entityId: data.id });
+  if (!hasSupabaseEnv()) return { ok: false, changed: false, message: "Supabase is not connected." };
+  const result = await runBackup({ type: "manual", triggeredBy: profile.id });
+  await writeAuditLog({
+    action: "backup.manual",
+    entityType: "backup_run",
+    result: result.ok ? "success" : "failure",
+    failureReason: result.ok ? null : result.message,
+    diff: { changed: result.changed, commit: result.commitUrl ?? null }
+  }).catch(() => undefined);
   revalidatePath("/backups");
+  return result;
 }
