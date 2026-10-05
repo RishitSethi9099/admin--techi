@@ -80,7 +80,7 @@ export default async function TeamAccessPage({
           <KeyRound className="h-4 w-4 text-primary" />
           Create admin access
         </div>
-        <TeamAccessCreateForm clubs={clubs} />
+        <TeamAccessCreateForm clubs={clubs} collabIds={Array.from(collabIds)} />
         {!clubs.length ? (
           <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">
             Create/import clubs first. Club admins and POC admins need a club assignment before they can be created.

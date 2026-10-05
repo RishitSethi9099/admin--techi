@@ -14,7 +14,8 @@ function clubLabel(club: Club) {
   return club.short_name ? `${club.short_name} — ${club.name}` : club.name;
 }
 
-export function TeamAccessCreateForm({ clubs }: { clubs: Club[] }) {
+/** collabIds: collab entries ("ACM x SIGAI") — not offered for Club Admin accounts, since the partner clubs' admins run them */
+export function TeamAccessCreateForm({ clubs, collabIds = [] }: { clubs: Club[]; collabIds?: string[] }) {
   const [role, setRole] = useState<AppRole>("club_admin");
   const [nextOpsRowId, setNextOpsRowId] = useState(1);
   const [opsClubRows, setOpsClubRows] = useState<OpsClubRow[]>([{ id: 0, clubId: "" }]);
@@ -61,7 +62,7 @@ export function TeamAccessCreateForm({ clubs }: { clubs: Club[] }) {
           <span className="mb-1 block text-xs font-semibold text-muted">Club Admin access</span>
           <select name="club_id" required className="h-11 w-full rounded-lg border border-border px-3" disabled={noClubs}>
             <option value="">{noClubs ? "No clubs yet" : "Select one club"}</option>
-            {clubs.map((club) => (
+            {clubs.filter((club) => !collabIds.includes(club.id)).map((club) => (
               <option key={club.id} value={club.id}>{clubLabel(club)}</option>
             ))}
           </select>
