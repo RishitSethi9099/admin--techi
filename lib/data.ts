@@ -88,6 +88,28 @@ export async function getAdmins() {
   }));
 }
 
+/** Collab entries ("ACM x SIGAI") and the partner clubs they belong to (migration 016). */
+export async function getClubCollabs() {
+  if (!hasSupabaseEnv()) return [] as { collab_club_id: string; member_club_id: string }[];
+  const supabase = createSupabaseServerClient();
+  const { data, error } = await supabase.from("club_collabs").select("collab_club_id, member_club_id");
+  if (error) return []; // migration 016 not run yet
+  return (data ?? []) as { collab_club_id: string; member_club_id: string }[];
+}
+
+/**
+ * The clubs a Club Admin or Event Ops account works on.
+ * Club Admin: their own club plus every collab their club is part of.
+ * Event Ops: the clubs the Super Admin assigned to them.
+ */
+export async function getMyClubIds(profile: { id: string; role: string; club_id: string | null }) {
+  if (profile.role === "event_ops") return getAssignedClubIds(profile.id);
+  if (profile.role !== "club_admin" || !profile.club_id) return [] as string[];
+  const collabs = await getClubCollabs();
+  const ids = [profile.club_id, ...collabs.filter((c) => c.member_club_id === profile.club_id).map((c) => c.collab_club_id)];
+  return Array.from(new Set(ids));
+}
+
 export async function getAssignedClubIds(userId: string) {
   if (!hasSupabaseEnv()) return [] as string[];
 

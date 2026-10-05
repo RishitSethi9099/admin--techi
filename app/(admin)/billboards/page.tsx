@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { requireProfile } from "@/lib/auth";
 import { approveContent } from "@/lib/actions/content";
-import { getApprovalRequests, getAssignedClubIds, getBillboards, getClubs, getEventSlots, getScreenRotation } from "@/lib/data";
+import { getApprovalRequests, getMyClubIds, getBillboards, getClubs, getEventSlots, getScreenRotation } from "@/lib/data";
 import { BillboardForm } from "@/components/admin/billboard-form";
 import { BillboardLiveButton } from "@/components/admin/billboard-live-button";
 import { ScreenRotationPanel, type RotationSlot } from "@/components/admin/screen-rotation-panel";
@@ -52,7 +52,7 @@ export default async function BillboardsPage({ searchParams }: { searchParams?: 
     getClubs(),
     getEventSlots(),
     getApprovalRequests(),
-    profile.role === "event_ops" ? getAssignedClubIds(profile.id) : Promise.resolve([]),
+    isSuper ? Promise.resolve([] as string[]) : getMyClubIds(profile),
     isSuper ? getScreenRotation() : Promise.resolve(null)
   ]);
   const rotationSlots: RotationSlot[] = eventSlots
@@ -67,7 +67,7 @@ export default async function BillboardsPage({ searchParams }: { searchParams?: 
       ? clubs
       : profile.role === "event_ops"
         ? clubs.filter((club) => assignedClubIds.includes(club.id))
-        : clubs.filter((club) => club.id === profile.club_id);
+        : clubs.filter((club) => assignedClubIds.includes(club.id));
   const assignedClub = visibleClubs[0] ?? null;
 
   // Super Admin: one club at a time (picked from the dropdown), optionally only major or minor
@@ -88,14 +88,14 @@ export default async function BillboardsPage({ searchParams }: { searchParams?: 
       : billboards.filter((billboard) => billboard.status === "pending" && tierMatch(tierOf(billboard)))
     : profile.role === "event_ops"
       ? billboards.filter((billboard) => assignedClubIds.includes(billboard.club_id))
-      : billboards.filter((billboard) => billboard.club_id === profile.club_id);
+      : billboards.filter((billboard) => assignedClubIds.includes(billboard.club_id));
   const visibleSlots = isSuper
     ? pickedClub
       ? eventSlots.filter((slot) => slot.club_id === pickedClub.id && tierMatch(slot.event_tier))
       : []
     : profile.role === "event_ops"
       ? eventSlots.filter((slot) => assignedClubIds.includes(slot.club_id))
-      : eventSlots.filter((slot) => slot.club_id === profile.club_id);
+      : eventSlots.filter((slot) => assignedClubIds.includes(slot.club_id));
 
   // overview rows for the Super Admin when no club is picked
   const overview = isSuper && !pickedClub

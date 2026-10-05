@@ -187,7 +187,7 @@ export function BillboardForm({
               ))}
             </select>
           ) : (
-            <input type="hidden" name="club_id" value={assignedClub?.id ?? slot.club_id} />
+            <input type="hidden" name="club_id" value={slot.club_id} />
           )}
           <input type="hidden" name="event_slot_id" value={slot.id} />
           <input type="hidden" name="title" value={slot.event_name} />

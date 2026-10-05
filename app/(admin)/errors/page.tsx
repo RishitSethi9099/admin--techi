@@ -5,7 +5,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { Card } from "@/components/ui/card";
 import { requirePermission } from "@/lib/auth";
-import { getAssignedClubIds, getClubs, getCrashLogs } from "@/lib/data";
+import { getMyClubIds, getClubs, getCrashLogs } from "@/lib/data";
 import { formatDateTime } from "@/lib/utils";
 import type { CrashLog } from "@/lib/supabase/types";
 import { ErrorResolveButton } from "@/components/admin/error-resolve-button";
@@ -43,11 +43,11 @@ export default async function ErrorsPage({ searchParams }: { searchParams?: { cl
   const [errors, clubs, assignedClubIds] = await Promise.all([
     getCrashLogs({ clubId: clubFilter, scope, status }),
     getClubs(),
-    profile.role === "event_ops" ? getAssignedClubIds(profile.id) : Promise.resolve([] as string[])
+    isSuper ? Promise.resolve([] as string[]) : getMyClubIds(profile)
   ]);
   const myClubs =
     profile.role === "club_admin"
-      ? clubs.filter((club) => club.id === profile.club_id)
+      ? clubs.filter((club) => assignedClubIds.includes(club.id))
       : profile.role === "event_ops"
         ? clubs.filter((club) => assignedClubIds.includes(club.id))
         : [];

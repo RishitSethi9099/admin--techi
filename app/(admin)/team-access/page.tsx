@@ -5,7 +5,7 @@ import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { requireSuperAdmin } from "@/lib/auth";
-import { getAdmins, getClubs } from "@/lib/data";
+import { getAdmins, getClubCollabs, getClubs } from "@/lib/data";
 import { updateAdmin } from "@/lib/actions/admins";
 import { formatDateTime } from "@/lib/utils";
 import { TeamAccessCreateForm } from "@/components/admin/team-access-create-form";
@@ -18,10 +18,12 @@ export default async function TeamAccessPage({
   searchParams?: { created?: string; updated?: string; email?: string; error?: string };
 }) {
   const me = await requireSuperAdmin();
-  const loadResult = await Promise.all([getAdmins(), getClubs()])
-    .then(([admins, clubs]) => ({ admins, clubs, error: null as string | null }))
-    .catch((error: Error) => ({ admins: [], clubs: [], error: error.message }));
+  const loadResult = await Promise.all([getAdmins(), getClubs(), getClubCollabs()])
+    .then(([admins, clubs, collabs]) => ({ admins, clubs, collabs, error: null as string | null }))
+    .catch((error: Error) => ({ admins: [], clubs: [], collabs: [] as { collab_club_id: string }[], error: error.message }));
   const { admins, clubs } = loadResult;
+  // collab entries ("ACM x SIGAI") don't get their own admin: the partner clubs' admins run them
+  const collabIds = new Set(loadResult.collabs.map((c) => c.collab_club_id));
   const clubName = (id: string | null) => clubs.find((club) => club.id === id)?.name ?? "All clubs";
 
   return (
@@ -68,7 +70,7 @@ export default async function TeamAccessPage({
         </div>
         <p className="mb-4 text-sm text-muted">Create many club admin accounts from one spreadsheet. Each gets a generated password you can send on WhatsApp.</p>
         <BulkClubAdmins
-          clubs={clubs}
+          clubs={clubs.filter((club) => !collabIds.has(club.id))}
           admins={admins.map((admin) => ({ email: admin.email ?? "", club_id: admin.club_id ?? null, role: admin.role, name: admin.name }))}
         />
       </Card>

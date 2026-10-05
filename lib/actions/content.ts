@@ -5,7 +5,7 @@ import { z } from "zod";
 import { requireProfile, requireSuperAdmin } from "@/lib/auth";
 import { writeAuditLog } from "@/lib/actions/audit";
 import { createSupabaseServerClient, hasSupabaseEnv } from "@/lib/supabase/server";
-import { getAssignedClubIds } from "@/lib/data";
+import { getMyClubIds } from "@/lib/data";
 import { istToIso } from "@/lib/event-time";
 
 const billboardSchema = z.object({
@@ -105,10 +105,8 @@ export async function saveBillboard(_previousState: { ok: boolean; message: stri
     display_order: formData.get("display_order") || 0,
     active: formData.get("active") === "on"
   });
-  if (profile.role === "club_admin" && parsed.club_id !== profile.club_id) return { ok: false, message: "Wrong club scope." };
-  if (profile.role === "event_ops") {
-    const assignedClubIds = await getAssignedClubIds(profile.id);
-    if (!assignedClubIds.includes(parsed.club_id)) return { ok: false, message: "Wrong event ops club scope." };
+  if (profile.role !== "super_admin" && !(await getMyClubIds(profile)).includes(parsed.club_id)) {
+    return { ok: false, message: "You can only submit for your own club or its collab events." };
   }
   const supabase = createSupabaseServerClient();
   let slot: BillboardEventSlot | null = null;
@@ -250,10 +248,8 @@ const eventSchema = z.object({
 });
 
 async function assertEventClubScope(profile: Awaited<ReturnType<typeof requireProfile>>, clubId: string) {
-  if (profile.role === "club_admin" && clubId !== profile.club_id) throw new Error("Wrong club scope.");
-  if (profile.role === "event_ops") {
-    const assignedClubIds = await getAssignedClubIds(profile.id);
-    if (!assignedClubIds.includes(clubId)) throw new Error("Wrong event ops club scope.");
+  if (profile.role !== "super_admin" && !(await getMyClubIds(profile)).includes(clubId)) {
+    throw new Error("Wrong club scope.");
   }
 }
 

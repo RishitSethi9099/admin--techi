@@ -4,7 +4,7 @@ import { PageTitle } from "@/components/admin/page-title";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { requireProfile } from "@/lib/auth";
-import { getAssignedClubIds, getClubs, getEventSlots, getEvents } from "@/lib/data";
+import { getMyClubIds, getClubs, getEventSlots, getEvents } from "@/lib/data";
 import { DeleteEventButton, EventForm, type EventSlotInfo } from "@/components/admin/event-form";
 import { formatEventRange } from "@/lib/event-time";
 import type { Club, Event, EventSlot } from "@/lib/supabase/types";
@@ -101,7 +101,7 @@ export default async function EventsPage({ searchParams }: { searchParams?: { cl
     getEvents(),
     getClubs(),
     getEventSlots(),
-    profile.role === "event_ops" ? getAssignedClubIds(profile.id) : Promise.resolve([] as string[])
+    isSuper ? Promise.resolve([] as string[]) : getMyClubIds(profile)
   ]);
   const order = (list: EventSlot[]) => [...list].sort((a, b) => (a.event_tier === b.event_tier ? a.event_number - b.event_number : a.event_tier === "major" ? -1 : 1));
   const slotsFor = (clubId: string) => order(slots.filter((slot) => slot.club_id === clubId));
@@ -112,7 +112,7 @@ export default async function EventsPage({ searchParams }: { searchParams?: { cl
     ? pickedClub ? [pickedClub] : []
     : profile.role === "event_ops"
       ? clubs.filter((club) => assignedClubIds.includes(club.id))
-      : clubs.filter((club) => club.id === profile.club_id);
+      : clubs.filter((club) => assignedClubIds.includes(club.id));
   const special = events.filter((event) => !event.event_slot_id && !event.deleted_at);
   const clubsWithSlots = clubs
     .filter((club) => slots.some((slot) => slot.club_id === club.id))

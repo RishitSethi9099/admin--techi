@@ -5,7 +5,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { Card } from "@/components/ui/card";
 import { requireProfile } from "@/lib/auth";
-import { getAdmins, getApprovalRequests, getAuditLogs, getBillboards, getClubs, getCrashLogs, getEvents } from "@/lib/data";
+import { getAdmins, getApprovalRequests, getAuditLogs, getBillboards, getClubs, getCrashLogs, getEvents, getMyClubIds } from "@/lib/data";
 import { formatDateTime } from "@/lib/utils";
 
 export default async function DashboardPage() {
@@ -21,8 +21,9 @@ export default async function DashboardPage() {
   ]);
 
   if (profile.role === "club_admin") {
-    const clubEvents = events.filter((event) => event.club_id === profile.club_id);
-    const clubBillboards = billboards.filter((billboard) => billboard.club_id === profile.club_id);
+    const myClubIds = await getMyClubIds(profile); // own club + its collabs
+    const clubEvents = events.filter((event) => myClubIds.includes(event.club_id));
+    const clubBillboards = billboards.filter((billboard) => myClubIds.includes(billboard.club_id));
     const ownApprovals = approvals.filter((approval) => approval.requested_by === profile.id);
     return (
       <>
