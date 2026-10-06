@@ -4,7 +4,7 @@ import { PageTitle } from "@/components/admin/page-title";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { requireProfile } from "@/lib/auth";
-import { getMyClubIds, getClubs, getEventSlots, getEvents } from "@/lib/data";
+import { getClubCollabs, getMyClubIds, getClubs, getEventSlots, getEvents } from "@/lib/data";
 import { DeleteEventButton, EventForm, type EventSlotInfo } from "@/components/admin/event-form";
 import { formatEventRange } from "@/lib/event-time";
 import type { Club, Event, EventSlot } from "@/lib/supabase/types";
@@ -49,7 +49,7 @@ function SlotSection({ slot, event, clubs }: { slot: EventSlot; event?: Event; c
   );
 }
 
-function ClubEvents({ club, slots, events, clubs, showName }: { club: Club; slots: EventSlot[]; events: Event[]; clubs: Club[]; showName: boolean }) {
+function ClubEvents({ club, slots, events, clubs, showName, collabNote }: { club: Club; slots: EventSlot[]; events: Event[]; clubs: Club[]; showName: boolean; collabNote?: string | null }) {
   const linked = (slot: EventSlot) => events.find((event) => event.event_slot_id === slot.id && !event.deleted_at);
   const unlinked = events.filter((event) => event.club_id === club.id && !event.event_slot_id && !event.deleted_at);
   const free = slots.filter((slot) => !linked(slot)).map(slotInfo);
@@ -57,7 +57,10 @@ function ClubEvents({ club, slots, events, clubs, showName }: { club: Club; slot
   return (
     <section className="mb-8 grid gap-4">
       <div className="flex flex-wrap items-baseline justify-between gap-2 px-1">
-        <h2 className="text-lg font-semibold">{showName ? club.name : "Your events"}</h2>
+        <h2 className="text-lg font-semibold">
+          {showName ? club.name : "Your events"}
+          {collabNote ? <span className="ml-2 rounded-md bg-amber-100 px-2 py-0.5 align-middle text-xs font-semibold text-amber-800">{collabNote} · shared, either club can edit</span> : null}
+        </h2>
         <span className="text-sm text-muted">
           {slots.length ? `${majors} major · ${slots.length - majors} minor · ${slots.filter((slot) => linked(slot)).length} of ${slots.length} scheduled` : ""}
         </span>
@@ -97,25 +100,37 @@ function ClubEvents({ club, slots, events, clubs, showName }: { club: Club; slot
 export default async function EventsPage({ searchParams }: { searchParams?: { club?: string } }) {
   const profile = await requireProfile();
   const isSuper = profile.role === "super_admin";
-  const [events, clubs, slots, assignedClubIds] = await Promise.all([
+  const [events, clubs, slots, assignedClubIds, collabs] = await Promise.all([
     getEvents(),
     getClubs(),
     getEventSlots(),
-    isSuper ? Promise.resolve([] as string[]) : getMyClubIds(profile)
+    isSuper ? Promise.resolve([] as string[]) : getMyClubIds(profile),
+    getClubCollabs()
   ]);
+  // collab entries ("ACM x SIGAI") show inside each partner club rather than as a club of their own
+  const collabIds = new Set(collabs.map((c) => c.collab_club_id));
+  const collabsOf = (clubId: string) => collabs.filter((c) => c.member_club_id === clubId).map((c) => c.collab_club_id);
+  const shortName = (id: string) => {
+    const club = clubs.find((c) => c.id === id);
+    return club?.short_name ?? club?.name ?? "club";
+  };
+  const collabLabel = (collabId: string, viewerClubId: string) =>
+    collabIds.has(collabId)
+      ? `Collab with ${Array.from(new Set(collabs.filter((c) => c.collab_club_id === collabId && c.member_club_id !== viewerClubId).map((c) => shortName(c.member_club_id)))).join(" + ")}`
+      : null;
   const order = (list: EventSlot[]) => [...list].sort((a, b) => (a.event_tier === b.event_tier ? a.event_number - b.event_number : a.event_tier === "major" ? -1 : 1));
   const slotsFor = (clubId: string) => order(slots.filter((slot) => slot.club_id === clubId));
   const linkedTo = (slot: EventSlot) => events.find((event) => event.event_slot_id === slot.id && !event.deleted_at);
 
   const pickedClub = isSuper && searchParams?.club ? clubs.find((club) => club.id === searchParams.club) ?? null : null;
   const scopeClubs = isSuper
-    ? pickedClub ? [pickedClub] : []
+    ? pickedClub ? [pickedClub, ...clubs.filter((club) => collabsOf(pickedClub.id).includes(club.id))] : []
     : profile.role === "event_ops"
       ? clubs.filter((club) => assignedClubIds.includes(club.id))
       : clubs.filter((club) => assignedClubIds.includes(club.id));
   const special = events.filter((event) => !event.event_slot_id && !event.deleted_at);
   const clubsWithSlots = clubs
-    .filter((club) => slots.some((slot) => slot.club_id === club.id))
+    .filter((club) => !collabIds.has(club.id) && slots.some((slot) => slot.club_id === club.id || collabsOf(club.id).includes(slot.club_id)))
     .sort((a, b) => (a.short_name ?? a.name).localeCompare(b.short_name ?? b.name));
 
   return (
@@ -155,12 +170,14 @@ export default async function EventsPage({ searchParams }: { searchParams?: { cl
                   <div key={club.id} className="grid grid-cols-[1fr_2.4fr_70px] items-center gap-3 px-4 py-3">
                     <div className="font-medium">{club.short_name ?? club.name}</div>
                     <div className="flex flex-wrap gap-2">
-                      {slotsFor(club.id).map((slot) => {
+                      {[club.id, ...collabsOf(club.id)].flatMap((id) => slotsFor(id)).map((slot) => {
                         const event = linkedTo(slot);
+                        const note = collabLabel(slot.club_id, club.id);
                         return (
                           <span key={slot.id} className="inline-flex items-center gap-2 rounded-lg border border-border bg-white px-2.5 py-1 text-sm">
                             <span className={`rounded px-1.5 py-0.5 text-[11px] font-bold uppercase ${slot.event_tier === "major" ? "bg-primary text-white" : "bg-slate-200 text-slate-700"}`}>{slot.event_tier}</span>
                             {slot.event_name}
+                            {note ? <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[11px] font-semibold text-amber-800">{note}</span> : null}
                             <ScheduleStatus event={event} />
                           </span>
                         );
@@ -176,7 +193,7 @@ export default async function EventsPage({ searchParams }: { searchParams?: { cl
       ) : null}
 
       {scopeClubs.map((club) => (
-        <ClubEvents key={club.id} club={club} slots={slotsFor(club.id)} events={events.filter((event) => event.club_id === club.id)} clubs={clubs} showName={isSuper || scopeClubs.length > 1} />
+        <ClubEvents key={club.id} collabNote={collabLabel(club.id, isSuper ? pickedClub?.id ?? "" : profile.club_id ?? "")} club={club} slots={slotsFor(club.id)} events={events.filter((event) => event.club_id === club.id)} clubs={clubs} showName={isSuper || scopeClubs.length > 1} />
       ))}
 
       {isSuper && !pickedClub ? (

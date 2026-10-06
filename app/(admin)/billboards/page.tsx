@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { requireProfile } from "@/lib/auth";
 import { approveContent } from "@/lib/actions/content";
-import { getApprovalRequests, getMyClubIds, getBillboards, getClubs, getEventSlots, getScreenRotation } from "@/lib/data";
+import { getApprovalRequests, getClubCollabs, getMyClubIds, getBillboards, getClubs, getEventSlots, getScreenRotation } from "@/lib/data";
 import { BillboardForm } from "@/components/admin/billboard-form";
 import { BillboardLiveButton } from "@/components/admin/billboard-live-button";
 import { ScreenRotationPanel, type RotationSlot } from "@/components/admin/screen-rotation-panel";
@@ -47,14 +47,28 @@ function tierOf(billboard: Billboard) {
 export default async function BillboardsPage({ searchParams }: { searchParams?: { club?: string; tier?: string } }) {
   const profile = await requireProfile();
   const isSuper = profile.role === "super_admin";
-  const [billboards, clubs, eventSlots, approvals, assignedClubIds, rotation] = await Promise.all([
+  const [billboards, clubs, eventSlots, approvals, assignedClubIds, rotation, collabs] = await Promise.all([
     getBillboards(),
     getClubs(),
     getEventSlots(),
     getApprovalRequests(),
     isSuper ? Promise.resolve([] as string[]) : getMyClubIds(profile),
-    isSuper ? getScreenRotation() : Promise.resolve(null)
+    isSuper ? getScreenRotation() : Promise.resolve(null),
+    getClubCollabs()
   ]);
+  // collab entries ("Pitchers X EIS") are shown inside each partner club, not as a club of their own
+  const collabIds = new Set(collabs.map((c) => c.collab_club_id));
+  const shortName = (id: string) => {
+    const club = clubs.find((c) => c.id === id);
+    return club?.short_name ?? club?.name ?? "club";
+  };
+  const collabsOf = (clubId: string) => collabs.filter((c) => c.member_club_id === clubId).map((c) => c.collab_club_id);
+  const belongsTo = (slotClubId: string, clubId: string) => slotClubId === clubId || collabsOf(clubId).includes(slotClubId);
+  const collabLabel = (slotClubId: string, viewerClubId?: string | null) => {
+    if (!collabIds.has(slotClubId)) return null;
+    const others = Array.from(new Set(collabs.filter((c) => c.collab_club_id === slotClubId && c.member_club_id !== viewerClubId).map((c) => shortName(c.member_club_id))));
+    return `Collab with ${others.join(" + ")}`;
+  };
   const rotationSlots: RotationSlot[] = eventSlots
     .filter((slot) => slot.event_tier === "major")
     .map((slot) => {
@@ -68,7 +82,7 @@ export default async function BillboardsPage({ searchParams }: { searchParams?: 
       : profile.role === "event_ops"
         ? clubs.filter((club) => assignedClubIds.includes(club.id))
         : clubs.filter((club) => assignedClubIds.includes(club.id));
-  const assignedClub = visibleClubs[0] ?? null;
+  const assignedClub = (profile.role === "club_admin" ? visibleClubs.find((club) => club.id === profile.club_id) : visibleClubs[0]) ?? null;
 
   // Super Admin: one club at a time (picked from the dropdown), optionally only major or minor
   const tier = isSuper && (searchParams?.tier === "major" || searchParams?.tier === "minor") ? searchParams.tier : "all";
@@ -84,14 +98,14 @@ export default async function BillboardsPage({ searchParams }: { searchParams?: 
 
   const visibleBillboards = isSuper
     ? pickedClub
-      ? billboards.filter((billboard) => billboard.club_id === pickedClub.id && tierMatch(tierOf(billboard)))
+      ? billboards.filter((billboard) => belongsTo(billboard.club_id, pickedClub.id) && tierMatch(tierOf(billboard)))
       : billboards.filter((billboard) => billboard.status === "pending" && tierMatch(tierOf(billboard)))
     : profile.role === "event_ops"
       ? billboards.filter((billboard) => assignedClubIds.includes(billboard.club_id))
       : billboards.filter((billboard) => assignedClubIds.includes(billboard.club_id));
   const visibleSlots = isSuper
     ? pickedClub
-      ? eventSlots.filter((slot) => slot.club_id === pickedClub.id && tierMatch(slot.event_tier))
+      ? eventSlots.filter((slot) => belongsTo(slot.club_id, pickedClub.id) && tierMatch(slot.event_tier))
       : []
     : profile.role === "event_ops"
       ? eventSlots.filter((slot) => assignedClubIds.includes(slot.club_id))
@@ -100,15 +114,19 @@ export default async function BillboardsPage({ searchParams }: { searchParams?: 
   // overview rows for the Super Admin when no club is picked
   const overview = isSuper && !pickedClub
     ? clubs
+      .filter((club) => !collabIds.has(club.id))
       .map((club) => ({
         club,
         slots: eventSlots
-          .filter((slot) => slot.club_id === club.id && tierMatch(slot.event_tier))
+          .filter((slot) => belongsTo(slot.club_id, club.id) && tierMatch(slot.event_tier))
           .map((slot) => ({ slot, state: slotState(slot, billboards, approvals) }))
       }))
       .filter((row) => row.slots.length)
     : [];
-  const totals = overview.flatMap((row) => row.slots).reduce<Record<SlotState, number>>(
+  // count each event once, even when a collab shows under two clubs
+  const totals = (isSuper && !pickedClub ? eventSlots.filter((slot) => tierMatch(slot.event_tier)) : [])
+    .map((slot) => ({ state: slotState(slot, billboards, approvals) }))
+    .reduce<Record<SlotState, number>>(
     (acc, { state }) => ({ ...acc, [state]: acc[state] + 1 }),
     { live: 0, down: 0, pending: 0, rejected: 0, none: 0 }
   );
@@ -174,7 +192,7 @@ export default async function BillboardsPage({ searchParams }: { searchParams?: 
                 <select name="club" defaultValue={pickedClub?.id ?? ""} className="h-11 rounded-xl border border-border bg-white px-3">
                   <option value="">All clubs (overview)</option>
                   {clubs
-                    .filter((club) => eventSlots.some((slot) => slot.club_id === club.id))
+                    .filter((club) => !collabIds.has(club.id) && eventSlots.some((slot) => belongsTo(slot.club_id, club.id)))
                     .sort((a, b) => (a.short_name ?? a.name).localeCompare(b.short_name ?? b.name))
                     .map((club) => <option key={club.id} value={club.id}>{club.short_name ?? club.name}</option>)}
                 </select>
@@ -224,6 +242,7 @@ export default async function BillboardsPage({ searchParams }: { searchParams?: 
                           <span key={slot.id} className="inline-flex items-center gap-2 rounded-lg border border-border bg-white px-2.5 py-1 text-sm">
                             <span className={`rounded px-1.5 py-0.5 text-[11px] font-bold uppercase ${slot.event_tier === "major" ? "bg-primary text-white" : "bg-slate-200 text-slate-700"}`}>{slot.event_tier}</span>
                             {slot.event_name}
+                            {collabLabel(slot.club_id, club.id) ? <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[11px] font-semibold text-amber-800">{collabLabel(slot.club_id, club.id)}</span> : null}
                             <Badge tone={STATE_TONE[state]}>{STATE_LABEL[state]}</Badge>
                           </span>
                         ))}
@@ -270,7 +289,7 @@ export default async function BillboardsPage({ searchParams }: { searchParams?: 
           ) : (
             <div className="grid gap-4 xl:grid-cols-2">
               {visibleSlots.map((slot) => (
-                <BillboardForm key={slot.id} role={profile.role} visibleClubs={visibleClubs.filter((club) => club.id === slot.club_id)} assignedClub={visibleClubs.find((club) => club.id === slot.club_id) ?? assignedClub} slot={slot} submission={billboardSubmissions.get(slot.id) ?? null} />
+                <BillboardForm key={slot.id} collabNote={collabLabel(slot.club_id, isSuper ? pickedClub?.id : profile.club_id)} role={profile.role} visibleClubs={visibleClubs.filter((club) => club.id === slot.club_id)} assignedClub={visibleClubs.find((club) => club.id === slot.club_id) ?? assignedClub} slot={slot} submission={billboardSubmissions.get(slot.id) ?? null} />
               ))}
             </div>
           )}

@@ -23,13 +23,16 @@ export function BillboardForm({
   visibleClubs,
   assignedClub,
   slot,
-  submission
+  submission,
+  collabNote
 }: {
   role: AppRole;
   visibleClubs: Club[];
   assignedClub: Club | null;
   slot: EventSlot;
   submission?: { status: ApprovalStatus; message: string } | null;
+  /** "Collab with EIS": shared with the partner club, either side can upload */
+  collabNote?: string | null;
 }) {
   const type = slot.required_media_type;
   const [selectedClubId, setSelectedClubId] = useState(slot.club_id);
@@ -160,6 +163,11 @@ export function BillboardForm({
         <div className="text-xs font-semibold uppercase tracking-wide text-primary">{slotLabel(slot)}</div>
         <div className="mt-1 text-lg font-semibold text-foreground">{slot.event_name}</div>
         <div className="text-sm text-muted">{selectedClub?.name ?? slot.clubs?.name ?? "Assigned club"}</div>
+        {collabNote ? (
+          <div className="mt-2 inline-block rounded-md bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800">
+            {collabNote} · shared, either club can upload
+          </div>
+        ) : null}
       </div>
 
       {statusMessage && !isEditing ? (
