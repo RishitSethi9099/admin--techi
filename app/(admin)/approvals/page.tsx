@@ -5,12 +5,77 @@ import { StatusBadge } from "@/components/ui/status-badge";
 import { Card } from "@/components/ui/card";
 import { createApprovalRequest, reviewApprovalRequest } from "@/lib/actions/approvals";
 import { requireProfile } from "@/lib/auth";
-import { getApprovalRequests } from "@/lib/data";
+import { getApprovalRequests, getClubs } from "@/lib/data";
+import type { ApprovalRequest, Club } from "@/lib/supabase/types";
 import { formatDateTime } from "@/lib/utils";
+
+function text(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+/** What the club actually sent: the poster/video, club, event and their note. */
+function Submission({ request, clubs }: { request: ApprovalRequest; clubs: Club[] }) {
+  const v = request.proposed_value ?? {};
+  const media = text(v.media_url);
+  const type = text(v.type);
+  const isVideo = type === "video" || (media ? /\.(mp4|webm|mov)(\?|$)/i.test(media) : false);
+  const club = clubs.find((c) => c.id === v.club_id);
+  const event = text(v.event_name) ?? text(v.title);
+  const tier = text(v.event_tier);
+  const about = text(v.about_club);
+
+  if (request.resource_type !== "billboard") {
+    const entries = Object.entries(v).filter(([, value]) => value !== null && value !== "");
+    if (!entries.length) return null;
+    return (
+      <dl className="mt-3 grid gap-1 rounded-xl bg-slate-50 p-3 text-sm sm:grid-cols-[160px_1fr]">
+        {entries.map(([key, value]) => (
+          <div key={key} className="contents">
+            <dt className="font-medium text-muted">{key.replaceAll("_", " ")}</dt>
+            <dd className="break-words">{typeof value === "object" ? JSON.stringify(value) : String(value)}</dd>
+          </div>
+        ))}
+      </dl>
+    );
+  }
+
+  return (
+    <div className="mt-3 grid gap-4 rounded-xl border border-border bg-slate-50 p-3 sm:grid-cols-[minmax(0,280px)_1fr]">
+      <div className="overflow-hidden rounded-lg bg-slate-900">
+        {!media ? (
+          <div className="grid h-40 place-items-center text-sm text-slate-300">No file attached</div>
+        ) : isVideo ? (
+          <video src={media} controls muted loop playsInline preload="metadata" className="max-h-64 w-full bg-black" />
+        ) : (
+          <a href={media} target="_blank" rel="noreferrer" title="Open full size">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={media} alt={`${event ?? "Poster"} submitted by ${club?.name ?? "club"}`} className="max-h-64 w-full object-contain" />
+          </a>
+        )}
+      </div>
+      <div className="grid content-start gap-1.5 text-sm">
+        <div className="flex flex-wrap items-center gap-2">
+          {tier ? (
+            <span className={`rounded px-1.5 py-0.5 text-[11px] font-bold uppercase ${tier === "major" ? "bg-primary text-white" : "bg-slate-200 text-slate-700"}`}>{tier}</span>
+          ) : null}
+          <span className="font-semibold">{event ?? "Promotion"}</span>
+          <span className="text-muted">· {isVideo ? "video" : "poster"}</span>
+        </div>
+        <div><span className="text-muted">Club:</span> {club?.name ?? "Unknown club"}</div>
+        {about ? <p className="whitespace-pre-line text-foreground">{about}</p> : <p className="text-muted">No description given.</p>}
+        {media ? (
+          <a href={media} target="_blank" rel="noreferrer" className="w-fit font-semibold text-primary underline underline-offset-2">
+            Open {isVideo ? "video" : "poster"} in a new tab
+          </a>
+        ) : null}
+      </div>
+    </div>
+  );
+}
 
 export default async function ApprovalsPage() {
   const profile = await requireProfile();
-  const requests = await getApprovalRequests();
+  const [requests, clubs] = await Promise.all([getApprovalRequests(), getClubs()]);
   const visible = profile.role === "super_admin" ? requests : requests.filter((request) => request.requested_by === profile.id);
 
   return (
@@ -40,11 +105,14 @@ export default async function ApprovalsPage() {
         <Card className="overflow-hidden">
           <div className="divide-y divide-border">
             {visible.map((request) => (
-              <div key={request.id} className="grid gap-3 px-4 py-4 xl:grid-cols-[1fr_130px_140px_180px_260px] xl:items-center">
+              <div key={request.id} className="grid gap-3 px-4 py-4 xl:grid-cols-[1fr_130px_140px_180px_260px] xl:items-start">
                 <div>
-                  <div className="font-semibold">{request.action} {request.resource_type}</div>
+                  <div className="font-semibold">
+                    {request.resource_type === "billboard" && request.action === "promotion_submission" ? "Billboard submission" : `${request.action.replaceAll("_", " ")} · ${request.resource_type}`}
+                  </div>
                   <div className="text-sm text-muted">{request.requester_name} · {request.requester_role.replace("_", " ")}</div>
                   <div className="mt-1 text-xs text-muted">{request.reason ?? "No reason provided"}</div>
+                  <Submission request={request} clubs={clubs} />
                 </div>
                 <StatusBadge status={request.risk} />
                 <StatusBadge status={request.status} />
