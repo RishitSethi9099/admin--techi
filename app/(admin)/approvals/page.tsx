@@ -5,7 +5,7 @@ import { StatusBadge } from "@/components/ui/status-badge";
 import { Card } from "@/components/ui/card";
 import { createApprovalRequest, reviewApprovalRequest } from "@/lib/actions/approvals";
 import { requireProfile } from "@/lib/auth";
-import { getApprovalRequests, getClubs } from "@/lib/data";
+import { getAdmins, getApprovalRequests, getClubs } from "@/lib/data";
 import type { ApprovalRequest, Club } from "@/lib/supabase/types";
 import { formatDateTime } from "@/lib/utils";
 
@@ -75,7 +75,16 @@ function Submission({ request, clubs }: { request: ApprovalRequest; clubs: Club[
 
 export default async function ApprovalsPage() {
   const profile = await requireProfile();
-  const [requests, clubs] = await Promise.all([getApprovalRequests(), getClubs()]);
+  const [requests, clubs, admins] = await Promise.all([
+    getApprovalRequests(),
+    getClubs(),
+    profile.role === "super_admin" ? getAdmins() : Promise.resolve([])
+  ]);
+  const reviewerName = (id: string | null) => {
+    const admin = admins.find((a) => a.id === id);
+    return admin ? admin.name || admin.email : id ? "a Super Admin" : null;
+  };
+  const STATUS_WORD: Record<string, string> = { approved: "Approved", rejected: "Rejected", clarification_requested: "Clarification asked" };
   const visible = profile.role === "super_admin" ? requests : requests.filter((request) => request.requested_by === profile.id);
 
   return (
@@ -112,6 +121,14 @@ export default async function ApprovalsPage() {
                   </div>
                   <div className="text-sm text-muted">{request.requester_name} · {request.requester_role.replace("_", " ")}</div>
                   <div className="mt-1 text-xs text-muted">{request.reason ?? "No reason provided"}</div>
+                  {request.reviewed_at && STATUS_WORD[request.status] ? (
+                    <div className="mt-2 text-sm">
+                      <b>{STATUS_WORD[request.status]}</b>
+                      {reviewerName(request.reviewed_by) ? <> by <b>{reviewerName(request.reviewed_by)}</b></> : null}
+                      <span className="text-muted"> · {formatDateTime(request.reviewed_at)}</span>
+                      {request.review_note ? <div className="text-muted">Note: {request.review_note}</div> : null}
+                    </div>
+                  ) : null}
                   <Submission request={request} clubs={clubs} />
                 </div>
                 <StatusBadge status={request.risk} />
