@@ -78,16 +78,33 @@ export async function inviteAdmin(formData: FormData) {
     revalidatePath("/team-access");
     redirect("/team-access?created=1");
   }
-  const parsed = inviteSchema.parse({
-    name: formData.get("name"),
-    email: formData.get("email"),
-    login_id: formData.get("login_id"),
+  // a login ID can't have spaces: "Tvishi Upadhyay" -> "tvishi.upadhyay"
+  const rawLoginId = String(formData.get("login_id") ?? "").trim().toLowerCase().replace(/\s+/g, ".").replace(/[^a-z0-9._-]/g, "");
+  const check = inviteSchema.safeParse({
+    name: String(formData.get("name") ?? "").trim(),
+    email: String(formData.get("email") ?? "").trim().toLowerCase(),
+    login_id: rawLoginId,
     password: formData.get("password"),
     role: formData.get("role"),
     club_id: formData.get("club_id") || null,
     club_ids: formData.getAll("club_ids").filter(Boolean),
     club_name: (formData.get("club_name") as string) || null
   });
+  if (!check.success) {
+    // show what's wrong on the page instead of crashing it
+    const field = String(check.error.issues[0]?.path[0] ?? "");
+    const messages: Record<string, string> = {
+      name: "Enter the admin's name (at least 2 letters).",
+      email: "Enter a valid email address.",
+      login_id: "Login ID needs at least 3 characters: letters, numbers, dots, dashes or underscores.",
+      password: "Password must be at least 8 characters.",
+      role: "Pick a role.",
+      club_id: "Pick a club for this admin.",
+      club_ids: "Pick the clubs for this Ops / POC admin."
+    };
+    teamAccessError(messages[field] ?? "Some details are missing or not valid. Check the form and try again.");
+  }
+  const parsed = check.data;
   const service = createServiceRoleClient();
   let assignedClubId = parsed.club_id ?? null;
   const assignedClubIds = Array.from(new Set(parsed.club_ids));

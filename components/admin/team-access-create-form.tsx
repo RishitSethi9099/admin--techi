@@ -42,7 +42,7 @@ export function TeamAccessCreateForm({ clubs, collabIds = [] }: { clubs: Club[];
     <form action={inviteAdmin} className="grid gap-3">
       <div className="grid gap-3 xl:grid-cols-12">
         <input name="name" required placeholder="Name" className="h-11 rounded-lg border border-border px-3 xl:col-span-2" />
-        <input name="login_id" required placeholder="Login ID" className="h-11 rounded-lg border border-border px-3 xl:col-span-2" />
+        <input name="login_id" required minLength={3} placeholder="Login ID (no spaces)" title="Letters, numbers, dots, dashes or underscores. Spaces become dots." className="h-11 rounded-lg border border-border px-3 xl:col-span-2" />
         <input name="email" required type="email" placeholder="Email" className="h-11 rounded-lg border border-border px-3 xl:col-span-3" />
         <input name="password" required type="text" minLength={8} placeholder="Fixed password" className="h-11 rounded-lg border border-border px-3 xl:col-span-2" />
         <select
