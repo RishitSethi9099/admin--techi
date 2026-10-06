@@ -4,6 +4,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { Card } from "@/components/ui/card";
 import { createApprovalRequest, reviewApprovalRequest } from "@/lib/actions/approvals";
+import { ApprovalRevertButton } from "@/components/admin/approval-revert-button";
 import { requireProfile } from "@/lib/auth";
 import { getAdmins, getApprovalRequests, getClubs } from "@/lib/data";
 import type { ApprovalRequest, Club } from "@/lib/supabase/types";
@@ -134,13 +135,22 @@ export default async function ApprovalsPage() {
                 <StatusBadge status={request.risk} />
                 <StatusBadge status={request.status} />
                 <div className="text-sm text-muted">{formatDateTime(request.created_at)}</div>
-                {profile.role === "super_admin" && request.status === "pending" ? (
-                  <form action={reviewApprovalRequest} className="flex flex-wrap gap-2">
-                    <input type="hidden" name="id" value={request.id} />
-                    <button name="status" value="approved" className="rounded-lg bg-green-600 px-3 py-2 text-sm font-semibold text-white">Approve</button>
-                    <button name="status" value="rejected" className="rounded-lg bg-red-600 px-3 py-2 text-sm font-semibold text-white">Reject</button>
-                    <button name="status" value="clarification_requested" className="rounded-lg border border-border px-3 py-2 text-sm font-semibold">Clarify</button>
-                  </form>
+                {profile.role === "super_admin" ? (
+                  <div className="grid gap-2">
+                    {/* still open: decide (also after asking for clarification) */}
+                    {request.status === "pending" || request.status === "clarification_requested" ? (
+                      <form action={reviewApprovalRequest} className="flex flex-wrap gap-2">
+                        <input type="hidden" name="id" value={request.id} />
+                        <button name="status" value="approved" className="rounded-lg bg-green-600 px-3 py-2 text-sm font-semibold text-white">Approve</button>
+                        <button name="status" value="rejected" className="rounded-lg bg-red-600 px-3 py-2 text-sm font-semibold text-white">Reject</button>
+                        {request.status === "pending" ? (
+                          <button name="status" value="clarification_requested" className="rounded-lg border border-border px-3 py-2 text-sm font-semibold">Clarify</button>
+                        ) : null}
+                      </form>
+                    ) : null}
+                    {/* a decision clicked by mistake can be undone */}
+                    {request.status !== "pending" ? <ApprovalRevertButton id={request.id} status={request.status} /> : null}
+                  </div>
                 ) : null}
               </div>
             ))}

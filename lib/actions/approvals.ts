@@ -144,3 +144,61 @@ export async function reviewApprovalRequest(formData: FormData) {
   });
   revalidatePath("/approvals");
 }
+
+export type RevertResult = { ok: boolean; message: string };
+
+/**
+ * Undo a decision made by mistake: the request goes back to "pending" so it can be decided again.
+ * If approving it had published a billboard or event, that published copy is removed from the
+ * website (the uploaded file itself stays in storage, and approving again publishes it again).
+ */
+export async function revertApprovalRequest(id: string): Promise<RevertResult> {
+  await requireSuperAdmin();
+  if (!z.string().uuid().safeParse(id).success) return { ok: false, message: "Unknown request." };
+  if (!hasSupabaseEnv()) return { ok: true, message: "Moved back to pending." };
+
+  const supabase = createSupabaseServerClient();
+  const { data: request, error: readError } = await supabase.from("approval_requests").select("*").eq("id", id).single();
+  if (readError || !request) return { ok: false, message: readError?.message ?? "Request not found." };
+  if (request.status === "pending") return { ok: true, message: "It's already pending." };
+
+  let resourceId = request.resource_id as string | null;
+  let removed = false;
+  const table = request.resource_type === "billboard" ? "billboards" : request.resource_type === "event" ? "events" : null;
+  if (request.status === "approved" && resourceId && table) {
+    // only remove what this approval created (created at the moment it was approved), never an older record
+    const { data: row } = await supabase.from(table).select("id, created_at").eq("id", resourceId).maybeSingle();
+    const createdByApproval =
+      row && request.reviewed_at && Math.abs(Date.parse(row.created_at as string) - Date.parse(request.reviewed_at as string)) < 2 * 60 * 1000;
+    if (createdByApproval) {
+      const { error: deleteError } = await supabase.from(table).delete().eq("id", resourceId);
+      if (deleteError) {
+        // could not delete (e.g. something links to it): at least take it off the website
+        const takeDown = table === "billboards" ? { active: false } : { status: "draft" };
+        const { error: hideError } = await supabase.from(table).update(takeDown).eq("id", resourceId);
+        if (hideError) return { ok: false, message: `Could not take the published copy down: ${hideError.message}` };
+      } else {
+        resourceId = null;
+      }
+      removed = true;
+    }
+  }
+
+  const { error } = await supabase
+    .from("approval_requests")
+    .update({ status: "pending", resource_id: resourceId, reviewed_by: null, reviewed_at: null, review_note: null })
+    .eq("id", id);
+  if (error) return { ok: false, message: error.message };
+
+  await writeAuditLog({
+    action: "approval_request.reverted",
+    entityType: "approval_request",
+    entityId: id,
+    previousValue: { status: request.status, reviewed_by: request.reviewed_by, resource_id: request.resource_id },
+    newValue: { status: "pending", removed_published_copy: removed }
+  });
+  revalidatePath("/approvals");
+  revalidatePath("/billboards");
+  revalidatePath("/events");
+  return { ok: true, message: removed ? "Moved back to pending and taken off the website." : "Moved back to pending." };
+}
