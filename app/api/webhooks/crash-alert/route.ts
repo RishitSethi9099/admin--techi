@@ -124,7 +124,7 @@ export async function POST(request: Request) {
       fingerprint
     };
     let inserted = await supabase.from("crash_logs").insert(row).select("id").single();
-    if (inserted.error?.code === "42703") {
+    if (inserted.error && (inserted.error.code === "42703" || inserted.error.code === "PGRST204" || /column/i.test(inserted.error.message))) {
       // migration 012 not applied yet: store without the new columns (club stays in metadata)
       const { club_id: _club, fingerprint: _fp, ...legacyRow } = row;
       inserted = await supabase.from("crash_logs").insert(legacyRow).select("id").single();
