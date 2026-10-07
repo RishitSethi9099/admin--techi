@@ -135,15 +135,22 @@ async function reviewApprovalRequestOrThrow(formData: FormData) {
     if (request.resource_type === "billboard") {
       // a club re-submitting for the same event replaces its old live upload
       const slotId = (request.proposed_value as Record<string, unknown>)?.event_slot_id;
+      let switchedOff: string[] = [];
       if (typeof slotId === "string" && slotId) {
-        const { error: replaceError } = await supabase
+        const { data: off, error: replaceError } = await supabase
           .from("billboards")
           .update({ active: false })
           .eq("event_slot_id", slotId)
           .eq("status", "approved")
-          .eq("active", true);
+          .eq("active", true)
+          .select("id");
         if (replaceError) throw new Error(replaceError.message);
+        switchedOff = (off ?? []).map((row) => row.id as string);
       }
+      // if publishing the new upload fails, put the old one back on the website
+      const restoreOld = async () => {
+        if (switchedOff.length) await supabase.from("billboards").update({ active: true }).in("id", switchedOff);
+      };
       const { data: billboard, error: publishError } = await supabase
         .from("billboards")
         .insert({
@@ -155,7 +162,10 @@ async function reviewApprovalRequestOrThrow(formData: FormData) {
         })
         .select("id")
         .single();
-      if (publishError) throw new Error(publishError.message);
+      if (publishError) {
+        await restoreOld();
+        throw new Error(publishError.message);
+      }
       publishedResourceId = billboard.id;
     }
 

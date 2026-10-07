@@ -5,7 +5,8 @@ import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { requireProfile } from "@/lib/auth";
 import { approveContent } from "@/lib/actions/content";
-import { getApprovalRequests, getClubCollabs, getMyClubIds, getBillboards, getClubs, getEventSlots, getScreenRotation } from "@/lib/data";
+import { getApprovalRequests, getClubCollabs, getEvents, getMyClubIds, getBillboards, getClubs, getEventSlots, getScreenRotation } from "@/lib/data";
+import { DeletePulledPosterButton, PullPosterButton } from "@/components/admin/pull-poster";
 import { BillboardForm } from "@/components/admin/billboard-form";
 import { BillboardLiveButton } from "@/components/admin/billboard-live-button";
 import { ScreenRotationPanel, type RotationSlot } from "@/components/admin/screen-rotation-panel";
@@ -47,15 +48,24 @@ function tierOf(billboard: Billboard) {
 export default async function BillboardsPage({ searchParams }: { searchParams?: { club?: string; tier?: string } }) {
   const profile = await requireProfile();
   const isSuper = profile.role === "super_admin";
-  const [billboards, clubs, eventSlots, approvals, assignedClubIds, rotation, collabs] = await Promise.all([
+  const [billboards, clubs, eventSlots, approvals, assignedClubIds, rotation, collabs, events] = await Promise.all([
     getBillboards(),
     getClubs(),
     getEventSlots(),
     getApprovalRequests(),
     isSuper ? Promise.resolve([] as string[]) : getMyClubIds(profile),
     isSuper ? getScreenRotation() : Promise.resolve(null),
-    getClubCollabs()
+    getClubCollabs(),
+    getEvents()
   ]);
+  // posters clubs added to their event schedule: the Super Admin can pull them onto the billboards
+  const schedulePoster = new Map<string, string>();
+  for (const event of events) {
+    if (event.event_slot_id && event.poster_url && !event.deleted_at && !schedulePoster.has(event.event_slot_id)) schedulePoster.set(event.event_slot_id, event.poster_url);
+  }
+  const pulledFromSchedule = (billboard: Billboard) => Boolean(billboard.media_url && billboard.media_url.includes("/event-posters/"));
+  const canPull = (slot: EventSlot, state: SlotState) =>
+    isSuper && slot.event_tier === "minor" && slot.required_media_type === "poster" && (state === "none" || state === "rejected") && schedulePoster.has(slot.id);
   // collab entries ("Pitchers X EIS") are shown inside each partner club, not as a club of their own
   const collabIds = new Set(collabs.map((c) => c.collab_club_id));
   const shortName = (id: string) => {
@@ -244,6 +254,7 @@ export default async function BillboardsPage({ searchParams }: { searchParams?: 
                             {slot.event_name}
                             {collabLabel(slot.club_id, club.id) ? <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[11px] font-semibold text-amber-800">{collabLabel(slot.club_id, club.id)}</span> : null}
                             <Badge tone={STATE_TONE[state]}>{STATE_LABEL[state]}</Badge>
+                            {canPull(slot, state) ? <PullPosterButton compact slotId={slot.id} posterUrl={schedulePoster.get(slot.id)!} /> : null}
                           </span>
                         ))}
                       </div>
@@ -288,9 +299,28 @@ export default async function BillboardsPage({ searchParams }: { searchParams?: 
             </div>
           ) : (
             <div className="grid gap-4 xl:grid-cols-2">
-              {visibleSlots.map((slot) => (
-                <BillboardForm key={slot.id} collabNote={collabLabel(slot.club_id, isSuper ? pickedClub?.id : profile.club_id)} role={profile.role} visibleClubs={visibleClubs.filter((club) => club.id === slot.club_id)} assignedClub={visibleClubs.find((club) => club.id === slot.club_id) ?? assignedClub} slot={slot} submission={billboardSubmissions.get(slot.id) ?? null} />
-              ))}
+              {visibleSlots.map((slot) => {
+                const state = slotState(slot, billboards, approvals);
+                const pulled = billboards.find((b) => b.event_slot_id === slot.id && b.status === "approved" && b.active && pulledFromSchedule(b));
+                return (
+                <div key={slot.id} className="grid content-start gap-2">
+                {canPull(slot, state) ? <PullPosterButton slotId={slot.id} posterUrl={schedulePoster.get(slot.id)!} /> : null}
+                {pulled ? (
+                  <div className="grid gap-2 rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
+                    {isSuper ? (
+                      <span><b>Pulled from this club&apos;s event schedule.</b> The club admin can replace or delete it.</span>
+                    ) : (
+                      <span>
+                        <b>The Super Admin pulled this poster from your event schedule</b> and put it on the website. To use a different poster, press <b>Edit submission</b> and upload it. To remove it, delete it.
+                      </span>
+                    )}
+                    <DeletePulledPosterButton billboardId={pulled.id} eventName={slot.event_name} />
+                  </div>
+                ) : null}
+                <BillboardForm collabNote={collabLabel(slot.club_id, isSuper ? pickedClub?.id : profile.club_id)} role={profile.role} visibleClubs={visibleClubs.filter((club) => club.id === slot.club_id)} assignedClub={visibleClubs.find((club) => club.id === slot.club_id) ?? assignedClub} slot={slot} submission={billboardSubmissions.get(slot.id) ?? null} />
+                </div>
+                );
+              })}
             </div>
           )}
         </Card>
