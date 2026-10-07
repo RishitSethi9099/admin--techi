@@ -7,6 +7,7 @@ import { requireProfile } from "@/lib/auth";
 import { approveContent } from "@/lib/actions/content";
 import { getApprovalRequests, getClubCollabs, getEvents, getMyClubIds, getBillboards, getClubs, getEventSlots, getScreenRotation } from "@/lib/data";
 import { DeletePulledPosterButton, PullPosterButton } from "@/components/admin/pull-poster";
+import { OptimisePostersButton } from "@/components/admin/optimise-posters";
 import { BillboardForm } from "@/components/admin/billboard-form";
 import { BillboardLiveButton } from "@/components/admin/billboard-live-button";
 import { ScreenRotationPanel, type RotationSlot } from "@/components/admin/screen-rotation-panel";
@@ -210,6 +211,11 @@ export default async function BillboardsPage({ searchParams }: { searchParams?: 
               {tier !== "all" ? <input type="hidden" name="tier" value={tier} /> : null}
               <button className="h-11 rounded-xl bg-primary px-5 font-semibold text-white">Show</button>
             </form>
+            <OptimisePostersButton
+              posters={billboards
+                .filter((b) => b.status === "approved" && b.active && b.type === "poster" && b.media_url)
+                .map((b) => ({ id: b.id, url: b.media_url as string, name: `${b.clubs?.short_name ?? b.clubs?.name ?? "Club"} · ${b.event_name ?? b.title ?? "poster"}` }))}
+            />
             <div className="flex flex-wrap gap-2">
               {chip(href({ tier: null }), "Major + minor", tier === "all")}
               {chip(href({ tier: "major" }), "Major events", tier === "major")}

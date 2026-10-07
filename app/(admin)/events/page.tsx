@@ -26,7 +26,7 @@ function ScheduleStatus({ event }: { event?: Event }) {
 function SlotSection({ slot, event, clubs }: { slot: EventSlot; event?: Event; clubs: Club[] }) {
   const tier = slot.event_tier === "major" ? "major" : "minor";
   return (
-    <Card className={`overflow-hidden ${tier === "major" ? "border-primary/40" : ""}`}>
+    <Card className={`min-w-0 overflow-hidden ${tier === "major" ? "border-primary/40" : ""}`}>
       <div className={`flex flex-wrap items-start justify-between gap-3 px-5 py-4 ${tier === "major" ? "bg-primary-soft" : "bg-slate-50"}`}>
         <div className="min-w-0">
           <div className={`inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 text-xs font-bold uppercase tracking-wide ${tier === "major" ? "bg-primary text-white" : "bg-slate-200 text-slate-700"}`}>
@@ -55,7 +55,7 @@ function ClubEvents({ club, slots, events, clubs, showName, collabNote }: { club
   const free = slots.filter((slot) => !linked(slot)).map(slotInfo);
   const majors = slots.filter((slot) => slot.event_tier === "major").length;
   return (
-    <section className="mb-8 grid gap-4">
+    <section className="mb-8 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-4">
       <div className="flex flex-wrap items-baseline justify-between gap-2 px-1">
         <h2 className="text-lg font-semibold">
           {showName ? club.name : "Your events"}

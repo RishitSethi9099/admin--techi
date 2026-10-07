@@ -138,3 +138,22 @@ export async function deletePulledPoster(billboardId: string): Promise<Billboard
     return { ok: false, message: error instanceof Error ? error.message : "Could not delete the poster." };
   }
 }
+
+/** Super Admin: point a billboard at a smaller copy of its poster (made by "Optimise posters"). */
+export async function setBillboardMedia(input: { id: string; url: string }): Promise<BillboardActionResult> {
+  try {
+    const profile = await requireProfile();
+    if (profile.role !== "super_admin") return { ok: false, message: "Only the Super Admin can do this." };
+    if (!z.string().uuid().safeParse(input.id).success) return { ok: false, message: "Unknown poster." };
+    const base = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
+    if (!base || !input.url.startsWith(`${base}/storage/v1/object/public/`)) return { ok: false, message: "That link is not in our storage." };
+    const supabase = createSupabaseServerClient();
+    const { error } = await supabase.from("billboards").update({ media_url: input.url }).eq("id", input.id);
+    if (error) return { ok: false, message: error.message };
+    await writeAuditLog({ action: "billboard.poster_optimised", entityType: "billboard", entityId: input.id, diff: { media_url: input.url } });
+    revalidatePath("/billboards");
+    return { ok: true, message: "Optimised." };
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : "Could not update the poster." };
+  }
+}

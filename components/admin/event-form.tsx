@@ -32,7 +32,7 @@ function EventFields({
   onPosterProblem: (message: string | null) => void;
 }) {
   return (
-    <div className="grid gap-3">
+    <div className="grid min-w-0 gap-3 [&>*]:min-w-0">
       {event?.id ? <input type="hidden" name="id" value={event.id} /> : null}
       {slot ? (
         <>
@@ -107,11 +107,13 @@ function EventFields({
         <span className="mt-2 block text-xs">PNG, JPG or WebP. Any size.</span>
       </label>
       {event?.poster_url ? (
-        <div className="flex items-center gap-3 rounded-xl border border-border p-3">
-          <img src={event.poster_url} alt={`${event.title} poster preview`} className="h-24 w-20 rounded-lg object-cover" />
-          <div className="min-w-0 text-sm text-muted">
+        <div className="flex items-center gap-3 overflow-hidden rounded-xl border border-border p-3">
+          <img src={event.poster_url} alt={`${event.title} poster preview`} className="h-24 w-20 shrink-0 rounded-lg object-cover" />
+          <div className="w-0 flex-1 text-sm text-muted">
             <div className="font-medium text-foreground">Current poster</div>
-            <div className="truncate">{event.poster_url}</div>
+            <a href={event.poster_url} target="_blank" rel="noreferrer" className="block truncate text-primary underline underline-offset-2" title={event.poster_url}>
+              {decodeURIComponent(event.poster_url.split("/").pop() ?? "Open poster")}
+            </a>
           </div>
         </div>
       ) : null}
