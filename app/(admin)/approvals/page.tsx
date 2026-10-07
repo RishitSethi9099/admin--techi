@@ -74,7 +74,7 @@ function Submission({ request, clubs }: { request: ApprovalRequest; clubs: Club[
   );
 }
 
-export default async function ApprovalsPage() {
+export default async function ApprovalsPage({ searchParams }: { searchParams?: { error?: string } }) {
   const profile = await requireProfile();
   const [requests, clubs, admins] = await Promise.all([
     getApprovalRequests(),
@@ -92,6 +92,11 @@ export default async function ApprovalsPage() {
     <>
       <ConnectionBanner />
       <PageTitle title="Approvals" subtitle="Controlled workflow for sensitive changes and delete requests" />
+      {searchParams?.error ? (
+        <div role="alert" className="mb-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          <b>That didn&apos;t go through.</b> {searchParams.error}
+        </div>
+      ) : null}
       {profile.role !== "super_admin" ? (
         <Card className="mb-5 p-4">
           <form action={createApprovalRequest} className="grid gap-3 lg:grid-cols-[150px_150px_130px_1fr_auto]">

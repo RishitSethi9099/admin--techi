@@ -1,10 +1,11 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { z } from "zod";
 import { requirePermission, requireProfile, requireSuperAdmin } from "@/lib/auth";
 import { writeAuditLog } from "@/lib/actions/audit";
-import { createSupabaseServerClient, hasSupabaseEnv } from "@/lib/supabase/server";
+import { createServiceRoleClient, createSupabaseServerClient, hasSupabaseEnv } from "@/lib/supabase/server";
 
 const requestSchema = z.object({
   resource_type: z.string().min(2),
@@ -72,7 +73,47 @@ const reviewSchema = z.object({
   review_note: z.string().optional()
 });
 
+/** Turn database errors into something a person can act on. */
+function friendlyReviewError(message: string) {
+  if (/billboards_one_active_approved_per_club/.test(message)) {
+    return "This club already has a live billboard, and the database still allows only one per club. Run migration 017_one_live_billboard_per_event.sql in Supabase, then approve again.";
+  }
+  if (/billboards_one_live_per_event/.test(message)) {
+    return "This event already has a live billboard. Take the old one down in Billboards first, then approve this one.";
+  }
+  return message;
+}
+
+/** Errors inside the admin panel itself also go to the Errors page. */
+async function logAdminError(message: string, context: Record<string, unknown>) {
+  try {
+    await createServiceRoleClient().from("crash_logs").insert({
+      source: "admin",
+      severity: "critical",
+      error_type: "admin_action_failed",
+      message: `Approvals: ${message}`.slice(0, 500),
+      page_url: "/approvals",
+      metadata: context
+    });
+  } catch {
+    /* never let error logging break the page */
+  }
+}
+
 export async function reviewApprovalRequest(formData: FormData) {
+  // Show a message on the Approvals page instead of crashing it.
+  let failure: string | null = null;
+  try {
+    await reviewApprovalRequestOrThrow(formData);
+  } catch (error) {
+    if (error && typeof error === "object" && "digest" in error && String((error as { digest?: string }).digest).startsWith("NEXT_REDIRECT")) throw error;
+    failure = friendlyReviewError(error instanceof Error ? error.message : String(error));
+    await logAdminError(failure, { request_id: formData.get("id"), status: formData.get("status") });
+  }
+  if (failure) redirect(`/approvals?error=${encodeURIComponent(failure)}`);
+}
+
+async function reviewApprovalRequestOrThrow(formData: FormData) {
   const profile = await requireSuperAdmin();
   const parsed = reviewSchema.parse(Object.fromEntries(formData));
   if (!hasSupabaseEnv()) {
@@ -92,6 +133,17 @@ export async function reviewApprovalRequest(formData: FormData) {
   let publishedResourceId = request.resource_id as string | null;
   if (parsed.status === "approved" && !request.resource_id) {
     if (request.resource_type === "billboard") {
+      // a club re-submitting for the same event replaces its old live upload
+      const slotId = (request.proposed_value as Record<string, unknown>)?.event_slot_id;
+      if (typeof slotId === "string" && slotId) {
+        const { error: replaceError } = await supabase
+          .from("billboards")
+          .update({ active: false })
+          .eq("event_slot_id", slotId)
+          .eq("status", "approved")
+          .eq("active", true);
+        if (replaceError) throw new Error(replaceError.message);
+      }
       const { data: billboard, error: publishError } = await supabase
         .from("billboards")
         .insert({
