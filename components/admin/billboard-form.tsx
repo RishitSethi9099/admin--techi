@@ -115,7 +115,7 @@ export function BillboardForm({
       video.onerror = () => {
         URL.revokeObjectURL(url);
         setFileOk(false);
-        setFileMessage("Could not read video metadata. Try another MP4.");
+        setFileMessage("This browser can't play this video, so the website screens won't either. It is probably saved as HEVC/H.265 (common from CapCut and iPhones). Export it again as MP4 with the H.264 codec and upload that.");
       };
       video.src = url;
       return;
