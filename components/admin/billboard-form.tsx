@@ -83,7 +83,7 @@ export function BillboardForm({
 
   const specs = useMemo(() => {
     if (type === "video") {
-      return "Upload MP4 video only: 16:9, about 10 seconds, under 7 MB.";
+      return "Upload an MP4 video under 7 MB. Any shape works; wide (16:9) fills the screen best.";
     }
     return "Upload a poster image (PNG/JPG/WebP, any size). Best as tall 1:2 or wide 2:1.";
   }, [type]);
@@ -109,19 +109,8 @@ export function BillboardForm({
       video.preload = "metadata";
       video.onloadedmetadata = () => {
         URL.revokeObjectURL(url);
-        const ratio = video.videoWidth / video.videoHeight;
-        const duration = video.duration;
-        if (!closeTo(ratio, 16 / 9)) {
-          setFileOk(false);
-          setFileMessage("Video must be 16:9.");
-          return;
-        }
-        if (duration < 8 || duration > 12) {
-          setFileOk(false);
-          setFileMessage("Video should be about 10 seconds. Keep it between 8 and 12 seconds.");
-          return;
-        }
-        setFileMessage("Video looks good: MP4, 16:9, around 10 seconds, under 7 MB.");
+        // any shape is fine: the big screens fit the whole video in
+        setFileMessage("Video looks good: MP4 under 7 MB.");
       };
       video.onerror = () => {
         URL.revokeObjectURL(url);
